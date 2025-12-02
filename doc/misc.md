@@ -30,7 +30,7 @@ ENGINE = Memory
 SETTINGS min_rows_to_keep = 100, max_rows_to_keep = 1000;
 ```
 
-Client resposes table example:
+Client responses table example:
 ```
 CREATE TABLE clientResponse (
   responseTime DateTime64(3),
