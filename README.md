@@ -15,5 +15,5 @@ go build -o dnstap2clickhouse src/main.go
 Documentation
 =============
 
-Man page at (blob/main/doc/dnstap2clickhouse.md)
-Miscellaneous documentation at (blob/main/doc/misc.md)
+Man page at [doc/dnstap2clickhouse.md](../../blob/main/doc/dnstap2clickhouse.md)
+Miscellaneous documentation at [doc/misc.md](../../blob/main/doc/misc.md)

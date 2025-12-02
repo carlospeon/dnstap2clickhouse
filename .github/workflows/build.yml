@@ -1,0 +1,59 @@
+name: RPM Build
+
+env:
+  tag: ${{ github.ref_name }}
+  draft: true
+
+on: 
+  push:
+    tags:
+    - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: get version
+      id: version
+      run: |
+        version=${{ env.tag }}
+        echo "version=${version:1}" >> $GITHUB_OUTPUT
+
+    - name: checkout
+      uses: actions/checkout@v3
+
+    - name: build RPM package
+      id: buildrpm8
+      uses: carlospeon/buildrpm@rocky8
+      with:
+        spec: build/dnstap2clickhouse.spec
+        version: ${{ steps.version.outputs.version }}
+
+    - name: zip rpms
+      run: |
+        zip --junk-paths \
+          dnstap2clickhouse-${{ steps.version.outputs.version }}-el8-x86_64-rpms.zip \
+          ${{ steps.buildrpm8.outputs.rpms_path }}/x86_64/*.el8.x86_64.rpm
+
+    - name: build RPM package
+      id: buildrpm9
+      uses: carlospeon/buildrpm@rocky9
+      with:
+        spec: build/dnstap2clickhouse.spec
+        version: ${{ steps.version.outputs.version }}
+
+    - name: zip rpms
+      run: |
+        zip --junk-paths \
+          collectd-${{ steps.version.outputs.version }}-el9-x86_64-rpms.zip \
+          ${{ steps.buildrpm9.outputs.rpms_path }}/x86_64/*.el9.x86_64.rpm
+
+    - uses: ncipollo/release-action@v1
+      with:
+        name: dnstap2clickhouse-${{ steps.version.outputs.version }}
+        artifacts: "dnstap2clickhouse-${{ steps.version.outputs.version }}-*-x86_64-rpms*.zip"
+        artifactContentType: application/zip
+        replacesArtifacts: true
+        allowUpdates: true
+        draft: ${{ env.draft }}
+
