@@ -31,7 +31,7 @@ release=$(rpm --eval "${release_macro}")
 
 srpm="${name}-${version}-${release}.src.rpm"
 
-[ -d .rpmbuild ] || mkdir .rpmbuild
+[ -d ${target} ] || mkdir ${target}
 git archive --output=${target}/${name}-${version}.tar.gz --prefix=${name}-${version}/ HEAD
 
 mock --define "version ${version}" \
