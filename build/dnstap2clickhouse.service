@@ -1,0 +1,15 @@
+[Unit]
+Description=dnstap2clickhouse service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/dnstap2clickhouse
+KillSignal=SIGQUIT
+TimeoutStopSec=5
+Nice=10
+User=named
+Group=named
+
+[Install]
+WantedBy=multi-user.target
