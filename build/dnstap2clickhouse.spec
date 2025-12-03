@@ -1,5 +1,5 @@
 Name:           dnstap2clickhouse
-Version:        %{?version}
+Version:        %{?version}%{?!version:0.0}
 Release:        1%{?dist}
 Summary:        Read dnstap messages and write them to ClickHouse
 
