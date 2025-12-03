@@ -1,8 +1,15 @@
+Install
+=======
+Install rpms from GH releases or from copr:
+```
+dnf copr enable carlospeon/dnstap2clickhouse
+dnf -y install dnstap2clickhouse
 
-Bind
-====
+```
+Configuration
+=============
 
-Set *named* user as runtime for *dnstap2clickhouse*
+Set *named* user as runtime for *dnstap2clickhouse.service*
 ```
 ### Editing /etc/systemd/system/dnstap2clickhouse.service.d/override.conf
 ### Anything between here and the comment below will become the new contents of the file
@@ -12,6 +19,15 @@ Group=named
 
 ### Lines below this comment will be discarded
 ```
+
+Set UnixSocket location to "/run/named/dnstap.socket".
+```
+# /etc/dnstap2clickhouse.conf
+UnixSocket = "/run/named/dnstap.sock"
+```
+
+Bind
+====
 
 Config options to send client queries to dnstap unixsocket:
 ```

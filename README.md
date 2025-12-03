@@ -3,7 +3,11 @@ dnstap2clickhouse - read dnstap messages and write them to clickhouse.
 Install
 =======
 
-Check [Releases](../../releases)
+* Check [Releases](../../releases) for rpm packages.
+* Or install from *copr*
+```
+dnf copr enable carlospeon/dnstap2clickhouse
+```
 
 Build
 =====
@@ -17,4 +21,4 @@ Documentation
 
 Man page at [doc/dnstap2clickhouse.md](../../blob/main/doc/dnstap2clickhouse.md).
 
-Miscellaneous documentation at [doc/misc.md](../../blob/main/doc/misc.md).
+QuickStart for *bind* at [doc/quickstart.md](../../blob/main/doc/quickstart.md).
