@@ -1,4 +1,5 @@
 Name:           dnstap2clickhouse
+# Do not change next line, see copr.sh
 Version:        %{?version}
 Release:        1%{?dist}
 Summary:        Read dnstap messages and write them to ClickHouse
