@@ -15,6 +15,8 @@ outdir="${1}"
 target="./.rpmbuild"
 builddir="build"
 
+which git || dnf -y install git
+
 name=$(grep ^Name ${spec} | cut -f 2 -d : | xargs echo)
 version=$(git describe --tags | sed 's/-/_/g')
 version=${version:1}
@@ -24,7 +26,6 @@ release=$(rpm --eval "${release_macro}")
 srpm="${name}-${version}-${release}.src.rpm"
 
 [ -d ${target}/SOURCES ] || mkdir -p .rpmbuild/SOURCES
-which git || dnf -y install git
 git archive --output=${target}/SOURCES/${name}-${version}.tar.gz --prefix=${name}-${version}/ HEAD
 
 rpmbuild --define "_topdir ${target}" --define "version ${version}" -bs ${spec}
