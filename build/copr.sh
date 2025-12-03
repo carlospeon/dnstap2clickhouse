@@ -28,7 +28,8 @@ srpm="${name}-${version}-${release}.src.rpm"
 [ -d ${target}/SOURCES ] || mkdir -p .rpmbuild/SOURCES
 git archive --output=${target}/SOURCES/${name}-${version}.tar.gz --prefix=${name}-${version}/ HEAD
 
-rpmbuild --define "_topdir ${target}" --define "version ${version}" -bs ${spec}
+sed -i "/^Version/s/%{?version}/${version}/" ${spec}
+rpmbuild --define "_topdir ${target}" -bs ${spec}
 
 cp ${target}/SRPMS/${srpm} ${outdir}
 
