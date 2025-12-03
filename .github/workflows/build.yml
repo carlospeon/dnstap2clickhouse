@@ -53,9 +53,9 @@ jobs:
     - uses: ncipollo/release-action@v1
       with:
         name: dnstap2clickhouse-${{ steps.version.outputs.version }}
-        artifacts:
-          - "${{ steps.buildrpm8.outputs.rpms_path }}/x86_64/*.el8.x86_64.rpm"
-          - "${{ steps.buildrpm9.outputs.rpms_path }}/x86_64/*.el9.x86_64.rpm"
+        artifacts: >
+          ${{ steps.buildrpm8.outputs.rpms_path }}/x86_64/*.el8.x86_64.rpm,
+          ${{ steps.buildrpm9.outputs.rpms_path }}/x86_64/*.el9.x86_64.rpm
         artifactContentType: application/zip
         replacesArtifacts: true
         allowUpdates: true
