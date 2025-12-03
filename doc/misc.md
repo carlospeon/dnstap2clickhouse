@@ -2,8 +2,18 @@
 Bind
 ====
 
-Config options to send client queries to dnstap unixsocket:
+Set *named* user as runtime for *dnstap2clickhouse*
+```
+### Editing /etc/systemd/system/dnstap2clickhouse.service.d/override.conf
+### Anything between here and the comment below will become the new contents of the file
+[Service]
+User=named
+Group=named
 
+### Lines below this comment will be discarded
+```
+
+Config options to send client queries to dnstap unixsocket:
 ```
 options {
   // ...
@@ -12,7 +22,6 @@ options {
   //  ...  
 }
 ```
-
 
 ClickHouse
 ==========

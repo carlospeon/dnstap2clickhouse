@@ -94,7 +94,7 @@ func (ch *ClickHouse) Close() {
   if ch.Conn != nil {
     ch.Conn.Close()
   }
-  log.Info.Printf("ClickHouse Closed.\n")
+  log.Info.Printf("ClickHouse closed.\n")
 }
 
 func appendColumnName(stmt *string, name *string, counter *uint) {

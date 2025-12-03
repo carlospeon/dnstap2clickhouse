@@ -8,15 +8,17 @@ dnstap2clickhouse - read dnstap messages and write them to clickhouse.
 SYNOPSIS
 ========
 
-`dnstap2clickhouse [-config config-file] [-loglevel trace|debug|info|warn|error]`
+`dnstap2clickhouse [-config CONFIG_FILE] [-loglevel trace|debug|info|warn|error]`
 
 DESCRIPTION
 ===========
 
-dnstap2clickhouse reads *dnstap*  *"QueryMessages"* from *unixsocket* and write them to *clickhouse* in batchs.
-Some capabilities are:
+dnstap2clickhouse reads *dnstap* client *"QueryMessages"* and non OK (ie. *"NXDOMAIN"*,
+*"SERVFAIL"*, etc.) client *"ResponseMessages"* from *unixsocket* and write them to
+*clickhouse* in batchs. Some capabilities are:
 
-* Aggregate duplicated messages writting an extra column *ColumnCounter* with the number of occurences. 
+* Aggregate duplicated messages writing an extra column *CounterColumn* with the number
+of occurences.
 * Aggregate messages grouping by *QueryAddress*
 * Aggregate messages grouping by *QuestionName* and *QuestionType*
 
@@ -68,10 +70,8 @@ Password = ""
 Database = "default"
 
 # QueryTable. Table to insert client queries.
-# Set to empty string ("") to avoid writting client queries.
 QueryTable = "clientQuery"
 # ResponseTable. Table to insert client responses.
-# Set to empty string ("") to avoid writting client responses.
 ResponseTable = "clientResponse"
 # Column names
 QueryTimeColumn = "queryTime"
@@ -91,8 +91,31 @@ UnixSocket = "dnstap.sock"
 ReadTimeout = "5s"
 # Readers. Number of goroutines reading UnixSocket
 Readers = 1
+# ClientQueries. Process client queries
+ClientQueries = true
+# NonOkClientResponses. Process non OK client responses
+NonOkClientResponses = true
 ```
 
+CAVEATS
+=======
+**UnixSocket location, owner and permissions**.
+DNS server process must be able to write to it.
+* Choose an appropriate directory, specially if DNS server runs confined
+by *SELinux*.
+* Set an approriate *systemd* user for dnstap2clickhouse. Tipically same
+user as the DNS server is recommended.
+
+**Startup order/dependecies**.
+Tipically dnstap2clickhouse should start before the DNS server in order to
+create the *UnixSocket* prior to DNS start up, but convinient directories
+to create it maybe are not available before DNS start up.
+
+Some DNS servers are able to reconnect later to the socket and
+dnstap2clickhouse will retry to create de *UnixSocket* if the directory
+is not avaiable during startup but depending on the DNS server the apropiate
+startup order may differ.
+
 AUTHOR
-=====
+======
 Carlos Peón (carlospeon@gmail.com)

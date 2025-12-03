@@ -319,7 +319,7 @@ func (a *Aggregator) Run (context context.Context, wg *sync.WaitGroup) {
     case <-context.Done():
       return
     case q, ok := <-a.ReadQueryChannel:
-      if ok == false { // chan closed
+      if !ok { // chan closed
         log.Warn.Printf("Query Channel closed.\n")
         return
       }
@@ -336,7 +336,7 @@ func (a *Aggregator) Run (context context.Context, wg *sync.WaitGroup) {
       }
       a.QueryCounter++
     case r, ok := <-a.ReadResponseChannel:
-      if ok == false { // chan closed
+      if !ok { // chan closed
         log.Warn.Printf("Response Channel closed.\n")
         return
       }

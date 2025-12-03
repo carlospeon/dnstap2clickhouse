@@ -77,7 +77,7 @@ func main() {
   defer cancel()
   go initSignals(cancel)
 
-  err = run(ctx)
+  err = run(ctx, cancel)
   if err != nil {
     log.Debug.Printf("%s\n", err)
     cancel()
@@ -114,7 +114,7 @@ func signalHandler(signal os.Signal, cancel context.CancelFunc) {
   }
 }
 
-func run(ctx context.Context) error {
+func run(ctx context.Context, cancel context.CancelFunc) error {
   var err error = nil
   var wg sync.WaitGroup
 
@@ -146,7 +146,7 @@ func run(ctx context.Context) error {
     return err
   }
   wg.Add(1)
-  go dt.Listen(ctx, &wg)
+  go dt.Listen(ctx, cancel, &wg)
   for i := 0; i < cfg.Dnstap.Readers; i++ {
     wg.Add(1)
     go dt.Read(ctx, &wg)

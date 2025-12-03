@@ -36,11 +36,14 @@ import (
 )
 
 const MAX_READERS = 32
+const MAX_UNIXSOCKETDIR_WAIT_INTERVAL = 60
 
 type Config struct {
   UnixSocket string 
   ReadTimeout time.Duration
   Readers int
+  ClientQueries bool
+  NonOkClientResponses bool
 }
 
 type Dnstap struct {
@@ -56,13 +59,11 @@ type Dnstap struct {
 }
 
 func Init(d *Dnstap) (*Dnstap, error) {
-  var err error = nil
-
-  d.Listener, err = net.Listen("unix", d.Config.UnixSocket)
-  if err != nil {
-    return nil, err
+  if !d.Config.ClientQueries &&
+     !d.Config.NonOkClientResponses {
+    return nil, errors.New("Nothing to do, check configuration options " +
+                            "ClientQueries and/or NonOkClientResponses")
   }
-
   d.ConnChannel = make(chan *net.Conn, 1)
   log.Debug.Printf("Dnstap init: %s", d)
   return d, nil
@@ -81,13 +82,45 @@ func (d *Dnstap) CloseListen() {
 
   log.Info.Printf("Dnstap Listen closed")
 }
-func (d *Dnstap) Listen (context context.Context, wg *sync.WaitGroup) {
+func (d *Dnstap) Listen (context context.Context,
+                         cancel context.CancelFunc,
+                         wg *sync.WaitGroup) {
   defer wg.Done()
   /*
   defer d.CloseListen()
   Listener.Accept locks waiting for a connection
   CloseListen() must be call in other rutine to unlock
   */
+  var err error
+  wait := 0
+  timer := time.NewTimer(time.Duration(wait))
+  for {
+    select {
+    case <-context.Done():
+      return
+    case <-timer.C:
+      d.Listener, err = net.Listen("unix", d.Config.UnixSocket)
+      if err == nil {
+        break
+      }
+      if errors.Is(err, os.ErrNotExist) {
+        /*
+        Retry later, directory may be initialized
+        later during dns service startup
+        */
+        if wait < MAX_UNIXSOCKETDIR_WAIT_INTERVAL {
+          log.Warn.Printf("%s", err)
+          wait = wait * 2 + 1
+          timer.Reset(time.Duration(wait) * time.Second)
+          log.Warn.Printf("Retring in %d seconds...", wait)
+          continue
+        }
+      }
+      log.Error.Printf("%s", err)
+      cancel()
+    }
+  }
+
   for {
     select {
     case <-context.Done():
@@ -96,6 +129,8 @@ func (d *Dnstap) Listen (context context.Context, wg *sync.WaitGroup) {
       conn, err := d.Listener.Accept()
       if err != nil {
         if errors.Is(err, net.ErrClosed) {
+          // Listener closed, problably from d.CloseListen()
+          log.Info.Printf("%s", err)
           return
         }
         log.Error.Printf("%s", err)
@@ -128,7 +163,7 @@ func (d *Dnstap) Read(context context.Context, wg *sync.WaitGroup) {
   
   id := d.ReadersNumber.Add(1) - 1
   if id == MAX_READERS {
-    log.Warn.Printf("Reachec max number of readers %d", MAX_READERS)
+    log.Warn.Printf("Reached max number of readers %d", MAX_READERS)
     return
   }
 
@@ -140,7 +175,7 @@ func (d *Dnstap) Read(context context.Context, wg *sync.WaitGroup) {
       }
       return
     case d.ReadersConns[id], ok = <- d.ConnChannel:
-      if !ok {
+      if !ok { // chan closed
         return
       }
       reader, err := go_dnstap.NewReader(
@@ -207,6 +242,9 @@ func (d *Dnstap) Decode(context context.Context,
     */
     switch *(msg.Type) {
     case go_dnstap.Message_CLIENT_QUERY:
+      if !d.Config.ClientQueries {
+        continue
+      }
       if msg.QueryMessage == nil {
         log.Warn.Printf("CLIENT_QUERY without QueryMessage")
         continue
@@ -244,6 +282,9 @@ func (d *Dnstap) Decode(context context.Context,
         log.Debug.Printf("Dnstap write query: %s", q)
       }
     case go_dnstap.Message_CLIENT_RESPONSE:
+      if !d.Config.NonOkClientResponses {
+        continue
+      }
       if msg.ResponseMessage == nil {
         log.Warn.Printf("CLIENT_RESPONSE without ResponseMessage")
         continue

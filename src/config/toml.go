@@ -70,6 +70,8 @@ var Defaults = Config {
     UnixSocket: "dnstap.sock",
     ReadTimeout: 5 * time.Second,
     Readers: 1,
+		ClientQueries: true,
+		NonOkClientResponses: true,
   },
 }
 
@@ -176,6 +178,13 @@ func Load(args map[string]any, filePath string) (Config, error) {
   if !config.Aggregator.Aggregate {
     config.ClickHouse.CounterColumn = ""
   }
+  if !config.Dnstap.ClientQueries {
+    config.ClickHouse.QueryTable = ""
+  }
+  if !config.Dnstap.NonOkClientResponses {
+    config.ClickHouse.ResponseTable = ""
+  }
+
   return config, nil
 
 }
