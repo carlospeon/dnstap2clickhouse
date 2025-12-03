@@ -3,7 +3,7 @@ dnstap2clickhouse - read dnstap messages and write them to clickhouse.
 Install
 =======
 
-Check [Releases](releases)
+Check [Releases](../../releases)
 
 Build
 =====
