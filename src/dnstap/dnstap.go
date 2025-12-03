@@ -94,6 +94,7 @@ func (d *Dnstap) Listen (context context.Context,
   var err error
   wait := 0
   timer := time.NewTimer(time.Duration(wait))
+LOOP:
   for {
     select {
     case <-context.Done():
@@ -101,7 +102,7 @@ func (d *Dnstap) Listen (context context.Context,
     case <-timer.C:
       d.Listener, err = net.Listen("unix", d.Config.UnixSocket)
       if err == nil {
-        break
+        break LOOP
       }
       if errors.Is(err, os.ErrNotExist) {
         /*
