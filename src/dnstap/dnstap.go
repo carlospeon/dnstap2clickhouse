@@ -122,6 +122,11 @@ LOOP:
     }
   }
 
+  err = os.Chmod(d.Config.UnixSocket, 0o660)
+  if err != nil {
+    log.Warn.Printf("Chmod socket: %s", err)
+  }
+
   for {
     select {
     case <-context.Done():
