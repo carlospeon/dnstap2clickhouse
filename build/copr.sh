@@ -24,6 +24,7 @@ release=$(rpm --eval "${release_macro}")
 srpm="${name}-${version}-${release}.src.rpm"
 
 [ -d ${target}/SOURCES ] || mkdir -p .rpmbuild/SOURCES
+which git || dnf -y install git
 git archive --output=${target}/SOURCES/${name}-${version}.tar.gz --prefix=${name}-${version}/ HEAD
 
 rpmbuild --define "_topdir ${target}" --define "version ${version}" -bs ${spec}
