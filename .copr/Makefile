@@ -1,2 +1,2 @@
 srpm:
-    ./build/copr.sh $(spec) $(outdir)
+	./build/copr.sh $(spec) $(outdir)
