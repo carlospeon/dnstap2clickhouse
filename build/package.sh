@@ -16,8 +16,7 @@ while (($#)) ; do
   shift
 done
 
-#mock_configs="rocky+epel-9-x86_64"
-mock_configs=""
+mock_configs="rocky+epel-9-x86_64"
 
 target="./.rpmbuild"
 builddir="build"

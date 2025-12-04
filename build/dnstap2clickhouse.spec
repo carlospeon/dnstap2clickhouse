@@ -19,21 +19,21 @@ Read dnstap messages and write them to ClickHouse
 %global source_build_dir build
 %global man_section 7
 
+%if "%{?dist}" == "%{nil}"
+%define CGO "CGO_ENABLED=0"
+%endif
+
 %prep
 %autosetup
 
 %build
-%ifarch x86_64
-env CGO_ENABLED=0 go build -v -o %{source_build_dir}/%{name} src/main.go
-%else
-go build -v -o %{source_build_dir}/%{name} src/main.go
-%endif
+env %{?CGO} go build -v -o %{source_build_dir}/%{name} src/main.go
 pandoc --standalone --to man -o %{source_build_dir}/%{name}.%{man_section} doc/%{name}.md
 gzip %{source_build_dir}/%{name}.%{man_section}
 
 %install
 install -Dpm 0755 %{source_build_dir}/%{name} %{buildroot}%{_bindir}/%{name}
-install -Dpm 0644 %{source_build_dir}/%{name}.conf %{buildroot}%{_sysconfdir}/%{name}.conf
+install -Dpm 0640 %{source_build_dir}/%{name}.conf %{buildroot}%{_sysconfdir}/%{name}.conf
 install -Dpm 0644 %{source_build_dir}/%{name}.service %{buildroot}%{_unitdir}/%{name}.service
 install -Dpm 0644 %{source_build_dir}/%{name}.%{man_section}.gz %{buildroot}%{_mandir}/man%{man_section}/%{name}.%{man_section}.gz
 
