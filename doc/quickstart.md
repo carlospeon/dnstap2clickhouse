@@ -1,6 +1,6 @@
 Install
 =======
-Install rpms from GH releases or from copr:
+Install rpm from GH releases or from copr:
 ```
 dnf copr enable carlospeon/dnstap2clickhouse
 dnf -y install dnstap2clickhouse
@@ -9,30 +9,33 @@ dnf -y install dnstap2clickhouse
 Configuration
 =============
 
-Set *named* user as runtime for *dnstap2clickhouse.service*
+Set DNS server user as runtime for *dnstap2clickhouse.service*
 ```
 ### Editing /etc/systemd/system/dnstap2clickhouse.service.d/override.conf
 ### Anything between here and the comment below will become the new contents of the file
 [Service]
-User=named
-Group=named
+User=_DNS_USER_
+Group=_DNS_GROUP_
 
 ### Lines below this comment will be discarded
 ```
 
-Set UnixSocket location to "/run/named/dnstap.socket".
+Set UnixSocket location
 ```
 # /etc/dnstap2clickhouse.conf
-UnixSocket = "/run/named/dnstap.sock"
+UnixSocket = "_DNS_UNIXSOCKET_"
 ```
 
-Allow named user to read config
+Allow DNS server user to read config
 ```
-chgrp named /etc/dnstap2clickhouse.conf
+chgrp _DNS_USER_ /etc/dnstap2clickhouse.conf
 ```
-Run dnstap2clickhouse confined with named
+
+Run dnstap2clickhouse confined within DNS context
 ```
-chcon -u system_u -r object_r -t named_exec_t /usr/bin/dnstap2clickhouse
+semanage fcontext -d -t named_exec_t '/usr/bin/dnstap2clickhouse'
+semanage fcontext -a -t _DNS_CONTEXT_ '/usr/bin/dnstap2clickhouse'
+restorecon -F /usr/bin/dnstap2clickhouse
 ```
 
 Bind

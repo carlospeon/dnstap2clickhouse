@@ -18,8 +18,7 @@ builddir="build"
 which git || dnf -y install git
 
 name=$(grep ^Name ${spec} | cut -f 2 -d : | xargs echo)
-version=$(git describe --tags | sed 's/-/_/g')
-version=${version:1}
+version=$(git describe --tags | sed 's/v//;s/-/./;s/-/_/')
 release_macro=$(grep ^Release ${spec} | cut -f 2 -d : | xargs echo)
 release=$(rpm --eval "${release_macro}")
 

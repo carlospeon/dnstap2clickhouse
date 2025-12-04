@@ -1,16 +1,19 @@
-Name:           dnstap2clickhouse
+Name:             dnstap2clickhouse
 # Do not change next line, see copr.sh
-Version:        %{?version}
-Release:        1%{?dist}
-Summary:        Read dnstap messages and write them to ClickHouse
+Version:          %{?version}
+Release:          1%{?dist}
+Summary:          Read dnstap messages and write them to ClickHouse
 
-License:        GPLv3
-Source0:        %{name}-%{version}.tar.gz
+License:          GPLv3
+Source0:          %{name}-%{version}.tar.gz
 
-BuildRequires:  git golang pandoc gzip
-BuildRequires:  systemd-rpm-macros
+Provides:         %{name} = %{version}
 
-Provides:       %{name} = %{version}
+BuildRequires:    git golang pandoc gzip
+BuildRequires:    systemd-rpm-macros
+
+Requires(post):   policycoreutils-python-utils
+Requires(postun): policycoreutils-python-utils
 
 %description
 Read dnstap messages and write them to ClickHouse
@@ -18,6 +21,8 @@ Read dnstap messages and write them to ClickHouse
 %global debug_package %{nil}
 %global source_build_dir build
 %global man_section 7
+%global dns_selinux_fcontext named_exec_t
+%global dns_group named
 
 %if "%{?dist}" == "%{nil}"
 %define CGO "CGO_ENABLED=0"
@@ -31,6 +36,13 @@ env %{?CGO} go build -v -o %{source_build_dir}/%{name} src/main.go
 pandoc --standalone --to man -o %{source_build_dir}/%{name}.%{man_section} doc/%{name}.md
 gzip %{source_build_dir}/%{name}.%{man_section}
 
+%pre
+# do not set fcontext if already exists
+# still needs restorecon
+if ! semanage fcontext -l | grep -w '^%{_bindir}/%{name}' >/dev/null 2>&1; then
+  semanage fcontext -a -t %{dns_selinux_fcontext} '%{_bindir}/%{name}' 2>/dev/null || :
+fi
+
 %install
 install -Dpm 0755 %{source_build_dir}/%{name} %{buildroot}%{_bindir}/%{name}
 install -Dpm 0640 %{source_build_dir}/%{name}.conf %{buildroot}%{_sysconfdir}/%{name}.conf
@@ -41,15 +53,21 @@ install -Dpm 0644 %{source_build_dir}/%{name}.%{man_section}.gz %{buildroot}%{_m
 # go test should be here... :)
 
 %post
+restorecon -F %{_bindir}/%{name} || :
 %systemd_postun_with_restart %{name}.service
 
 %preun
 %systemd_preun %{name}.service
 
+%postun
+if [ $1 -eq 0 ] ; then
+  semanage fcontext -d -t %{dns_selinux_fcontext} '%{_bindir}/%{name}' 2>/dev/null || :
+fi
+
 %files
 %{_bindir}/%{name}
 %{_unitdir}/%{name}.service
-%config(noreplace) %{_sysconfdir}/%{name}.conf
+%config(noreplace) %attr(0640,root,%{dns_group}) %{_sysconfdir}/%{name}.conf
 %{_mandir}/man%{man_section}/%{name}.%{man_section}.gz
 
 %changelog

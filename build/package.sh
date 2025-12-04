@@ -24,7 +24,7 @@ mockdir="/var/lib/mock"
 
 spec="${builddir}/dnstap2clickhouse.spec"
 name=$(grep ^Name ${spec} | cut -f 2 -d : | xargs echo)
-version=$(git describe --tags | sed 's/-/_/g')
+version=$(git describe --tags | sed 's/v//;s/-/./;s/-/_/')
 release_macro=$(grep ^Release ${spec} | cut -f 2 -d : | xargs echo)
 release=$(rpm --eval "${release_macro}")
 

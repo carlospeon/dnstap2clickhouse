@@ -67,11 +67,11 @@ var Defaults = Config {
     CounterColumn: "counter",
   },
   Dnstap: dnstap.Config {
-    UnixSocket: "dnstap.sock",
+    UnixSocket: "/run/named/dnstap.sock",
     ReadTimeout: 5 * time.Second,
     Readers: 1,
-		ClientQueries: true,
-		NonOkClientResponses: true,
+    ClientQueries: true,
+    NonOkClientResponses: true,
   },
 }
 

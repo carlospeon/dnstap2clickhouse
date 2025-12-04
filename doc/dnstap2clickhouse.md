@@ -26,9 +26,11 @@ OPTIONS
 =======
 
 **-config** _CONFIG_FILE_
+
     Configuration file in *toml* format. Defaults to */etc/dnstap2clickhouse.conf*
 
 **-loglevel trace|debug|info|warn|error**
+
     Defaults to *info*
 
 FILES
@@ -84,8 +86,7 @@ CounterColumn = "counter"
 
 [Dnstap]
 # UnixSocket. Where to read dnstap messages from.
-# Bind example "/run/named/dnstap.sock"
-UnixSocket = "dnstap.sock"
+UnixSocket = "/run/named/dnstap.sock"
 ReadTimeout = "5s"
 # Readers. Number of goroutines reading UnixSocket
 Readers = 1
@@ -97,6 +98,12 @@ NonOkClientResponses = true
 
 CAVEATS
 =======
+
+Out of the box dnstap2clickhouse is installed to run with *bind*, that is,
+it will run with *named* user and within the same SELinux context.
+
+If you plan to use with other DNS servers take following into consideration:
+
 **UnixSocket location, owner and permissions**.
 DNS server process must be able to write to it, so:
 * Choose an appropriate directory, specially if DNS server runs confined
@@ -121,3 +128,4 @@ startup order may differ.
 AUTHOR
 ======
 Carlos Peón (carlospeon@gmail.com)
+
