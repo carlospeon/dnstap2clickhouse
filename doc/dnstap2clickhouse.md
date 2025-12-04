@@ -25,18 +25,16 @@ of occurences.
 OPTIONS
 =======
 
-`-config CONFIG_FILE`
-
+**-config** _CONFIG_FILE_
     Configuration file in *toml* format. Defaults to */etc/dnstap2clickhouse.conf*
 
-`-loglevel trace|debug|info|warn|error`
-
+**-loglevel trace|debug|info|warn|error**
     Defaults to *info*
 
 FILES
 =====
 
-* /etc/dnstap2clickhouse.conf. Defaults to:
+**/etc/dnstap2clickhouse.conf**. Default configuration:
 
 ```
 # LogLevel. Log levels are trace, debug, info, warn, error
@@ -100,11 +98,15 @@ NonOkClientResponses = true
 CAVEATS
 =======
 **UnixSocket location, owner and permissions**.
-DNS server process must be able to write to it.
+DNS server process must be able to write to it, so:
 * Choose an appropriate directory, specially if DNS server runs confined
 by *SELinux*.
 * Set an approriate *systemd* user for dnstap2clickhouse. Tipically same
 user as the DNS server is recommended.
+
+**Configuration permissions**
+Configuration store ClickHouse password so is not world accesible by default.
+Set a proper owner/group to it.
 
 **Startup order/dependecies**.
 Tipically dnstap2clickhouse should start before the DNS server in order to

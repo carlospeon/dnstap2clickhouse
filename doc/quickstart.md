@@ -26,6 +26,15 @@ Set UnixSocket location to "/run/named/dnstap.socket".
 UnixSocket = "/run/named/dnstap.sock"
 ```
 
+Allow named user to read config
+```
+chgrp named /etc/dnstap2clickhouse.conf
+```
+Run dnstap2clickhouse confined with named
+```
+chcon -u system_u -r object_r -t named_exec_t /usr/bin/dnstap2clickhouse
+```
+
 Bind
 ====
 
@@ -67,5 +76,52 @@ CREATE TABLE clientResponse (
   counter UInt64)
 ENGINE = Memory
 SETTINGS min_rows_to_keep = 100, max_rows_to_keep = 1000;
+```
+
+Grafana
+=======
+
+Top queryAddress bar chart:
+```
+SELECT
+    queryAddress,
+    sum(counter) as values
+FROM dnstap.clientQuery
+WHERE
+    questionName = '__ANY__' and
+    questionType = '__ANY__' and
+    $__timeFilter(queryTime)
+GROUP BY queryAddress
+ORDER BY values DESC
+LIMIT 10
+```
+
+Top *NXDOMAIN* bar chart:
+```
+SELECT
+    questionName || ' ' || questionType,
+    sum(counter) as values
+FROM dnstap.clientResponse
+WHERE
+    responseStatus == 'NXDOMAIN' and
+    queryAddress = '__ANY__' and
+    $__timeFilter(responseTime)
+GROUP BY responseStatus, questionName, questionType
+ORDER BY values DESC
+LIMIT 10
+```
+
+Non OK Responses time series:
+```
+SELECT
+    $__timeInterval(responseTime) AS responseTimeInterval,
+    responseStatus || ' ' || questionName || ' ' questionType,
+    sum(counter) as counter
+FROM dnstap.clientResponse
+WHERE
+    queryAddress = '__ANY__' and
+    $__timeFilter(responseTimeInterval)
+GROUP BY responseTimeInterval, responseStatus, questionName, questionType
+ORDER BY responseTimeInterval ASC
 ```
 
