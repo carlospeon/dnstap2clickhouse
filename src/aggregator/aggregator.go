@@ -43,8 +43,8 @@ type Aggregator struct {
   ReadResponseChannel chan Response
   WriteQueryChannel chan *list.List
   WriteResponseChannel chan *list.List
-  QueryAggregationMap QueryIdentityMap
-  ResponseAggregationMap ResponseIdentityMap
+  QueryAggregationMap AggregationMap
+  ResponseAggregationMap AggregationMap
   QueryList *list.List
   ResponseList *list.List
   QueryMutex *sync.Mutex
@@ -54,27 +54,28 @@ type Aggregator struct {
 }
 
 type Query struct {
+  QueryTime time.Time
   Identity string
   QueryAddress string
-  QueryTime time.Time
   QuestionName string
   QuestionType string
   Counter uint64
 }
 
 type Response struct {
-  Identity string
-  QueryAddress string
   ResponseTime time.Time
+  Identity string
+  ResponseStatus string
+  QueryAddress string
   QuestionName string
   QuestionType string
-  ResponseStatus string
   Counter uint64
 }
 
 type Identity = string
 type QueryAddress = string
 type QuestionName = string
+type QuestionNamePart = string
 type QuestionType = string
 type ResponseStatus = string
 type Counter struct {
@@ -82,19 +83,18 @@ type Counter struct {
   Counter uint64
 }
 
-type QueryIdentityMap = map[Identity]QueryAddressMap
-type QueryAddressMap = map[QueryAddress]QuestionNameMap
-type QuestionNameMap = map[QuestionName]QuestionTypeMap
-type QuestionTypeMap = map[QuestionType](*Counter)
+type AggregationMap = map[string]any
 
-type ResponseIdentityMap = map[Identity]ResponseStatusMap
-type ResponseStatusMap = map[ResponseStatus]QueryAddressMap
+type QuestionNamePartMap struct {
+	Last bool
+	Map map[QuestionNamePart]any
+}
 
 func Init(a *Aggregator) (*Aggregator) {
   a.ReadQueryChannel = make(chan Query, 256)
   a.ReadResponseChannel = make(chan Response, 256)
-  a.QueryAggregationMap = make(QueryIdentityMap)
-  a.ResponseAggregationMap = make(ResponseIdentityMap)
+	a.QueryAggregationMap = make(AggregationMap)
+  a.ResponseAggregationMap = make(AggregationMap)
   a.QueryMutex = &sync.Mutex{}
   a.ResponseMutex = &sync.Mutex{}
 
@@ -109,59 +109,31 @@ func (a *Aggregator) Close() {
   log.Info.Printf("Aggregator closed.\n")
 }
 
-func IncreaseQueryCounter (qim QueryIdentityMap, q Query) {
-  qam, ok := qim[q.Identity]
-  if !ok {
-    qam = make(QueryAddressMap)
-    qim[q.Identity] = qam
-  }
-  qnm, ok := qam[q.QueryAddress]
-  if !ok {
-    qnm = make(QuestionNameMap)
-    qam[q.QueryAddress] = qnm
-  }
-  qtm, ok := qnm[q.QuestionName]
-  if !ok {
-    qtm = make(QuestionTypeMap)
-    qnm[q.QuestionName] = qtm
-  }
-  counter, ok := qtm[q.QuestionType]
-  if !ok {
-    counter = &Counter{ Timestamp: q.QueryTime, Counter: 0 }
-    qtm[q.QuestionType] = counter
-  }
-  counter.Counter += q.Counter
-  log.Debug.Printf("Increase Couter for query %s", q)
+func GetOrCreateInnerMap(rootMap AggregationMap, keys ...string) AggregationMap {
+	m := rootMap
+	for _, k := range keys {
+		inner, ok := m[k]
+		if !ok {
+			inner = make(AggregationMap)
+			m[k] = inner
+		}
+		m = inner.(AggregationMap)
+	}
+	return m
 }
 
-func IncreaseResponseCounter (rim ResponseIdentityMap, r Response) {
-  rsm, ok := rim[r.Identity]
+func IncreaseQueryCounter (m AggregationMap, c *Counter, path ...string) {
+	
+	lastMap := GetOrCreateInnerMap(m, path[:len(path) - 1]...)
+
+	lastKey := path[len(path) - 1]
+  counter, ok := lastMap[lastKey].(*Counter)
   if !ok {
-    rsm = make(ResponseStatusMap)
-    rim[r.Identity] = rsm
-  }
-  qam, ok := rsm[r.ResponseStatus]
-  if !ok {
-    qam = make(QueryAddressMap)
-    rsm[r.ResponseStatus] = qam
-  }
-  qnm, ok := qam[r.QueryAddress]
-  if !ok {
-    qnm = make(QuestionNameMap)
-    qam[r.QueryAddress] = qnm
-  }
-  qtm, ok := qnm[r.QuestionName]
-  if !ok {
-    qtm = make(QuestionTypeMap)
-    qnm[r.QuestionName] = qtm
-  }
-  counter, ok := qtm[r.QuestionType]
-  if !ok {
-    counter = &Counter{ Timestamp: r.ResponseTime, Counter: 0 }
-    qtm[r.QuestionType] = counter
-  }
-  counter.Counter += r.Counter
-  log.Debug.Printf("Increase Couter for response %s", r)
+    lastMap[lastKey] = c
+  } else {
+  	counter.Counter += c.Counter
+	}
+  log.Debug.Printf("Increase Counter for query %+v", path)
 }
 
 func (a *Aggregator) AggregateQuery(q Query) {
@@ -171,28 +143,21 @@ func (a *Aggregator) AggregateQuery(q Query) {
 
   a.QueryMutex.Lock()
   if (a.Config.WriteUngrouped) {
-    IncreaseQueryCounter(a.QueryAggregationMap, q)
+    IncreaseQueryCounter(a.QueryAggregationMap, 
+		                     &Counter{ Timestamp: q.QueryTime, Counter: q.Counter },
+												 q.Identity, q.QueryAddress, q.QuestionName, q.QuestionType)
   }
   if (a.Config.GroupbyQuestion) {
-    IncreaseQueryCounter(a.QueryAggregationMap, Query{
-      Identity: q.Identity,
-      QueryAddress: q.QueryAddress,
-      QueryTime: q.QueryTime,
-      QuestionName: GROUPBY_TAG,
-      QuestionType: GROUPBY_TAG,
-      Counter: q.Counter,
-    })
+    IncreaseQueryCounter(a.QueryAggregationMap, 
+		                     &Counter{ Timestamp: q.QueryTime, Counter: q.Counter },
+												 q.Identity, q.QueryAddress, GROUPBY_TAG, GROUPBY_TAG)
   }
   if (a.Config.GroupbyQueryAddress) {
-    IncreaseQueryCounter(a.QueryAggregationMap, Query{
-      Identity: q.Identity,
-      QueryAddress: GROUPBY_TAG,
-      QueryTime: q.QueryTime,
-      QuestionName: q.QuestionName,
-      QuestionType: q.QuestionType,
-      Counter: q.Counter,
-    })
+    IncreaseQueryCounter(a.QueryAggregationMap, 
+		                     &Counter{ Timestamp: q.QueryTime, Counter: q.Counter },
+												 q.Identity, GROUPBY_TAG, q.QuestionName, q.QuestionType)
   }
+
   a.QueryMutex.Unlock()
 }
 
@@ -203,29 +168,19 @@ func (a *Aggregator) AggregateResponse(r Response) {
 
   a.ResponseMutex.Lock()
   if (a.Config.WriteUngrouped) {
-    IncreaseResponseCounter(a.ResponseAggregationMap, r)
+    IncreaseQueryCounter(a.ResponseAggregationMap, 
+		                     &Counter{ Timestamp: r.ResponseTime, Counter: r.Counter },
+												 r.Identity, r.ResponseStatus, r.QueryAddress, r.QuestionName, r.QuestionType)
   }
   if (a.Config.GroupbyQuestion) {
-    IncreaseResponseCounter(a.ResponseAggregationMap, Response{
-      Identity: r.Identity,
-      QueryAddress: r.QueryAddress,
-      ResponseTime: r.ResponseTime,
-      ResponseStatus: r.ResponseStatus,
-      QuestionName: GROUPBY_TAG,
-      QuestionType: GROUPBY_TAG,
-      Counter: r.Counter,
-    })
+    IncreaseQueryCounter(a.ResponseAggregationMap, 
+		                     &Counter{ Timestamp: r.ResponseTime, Counter: r.Counter },
+												 r.Identity, r.ResponseStatus, r.QueryAddress, GROUPBY_TAG, GROUPBY_TAG)
   }
   if (a.Config.GroupbyQueryAddress) {
-    IncreaseResponseCounter(a.ResponseAggregationMap, Response{
-      Identity: r.Identity,
-      QueryAddress: GROUPBY_TAG,
-      ResponseTime: r.ResponseTime,
-      ResponseStatus: r.ResponseStatus,
-      QuestionName: r.QuestionName,
-      QuestionType: r.QuestionType,
-      Counter: r.Counter,
-    })
+    IncreaseQueryCounter(a.ResponseAggregationMap, 
+		                     &Counter{ Timestamp: r.ResponseTime, Counter: r.Counter },
+												 r.Identity, r.ResponseStatus, GROUPBY_TAG, r.QuestionName, r.QuestionType)
   }
   a.ResponseMutex.Unlock()
 }
@@ -236,15 +191,16 @@ func (a *Aggregator) BuildQueryAggregationList() {
   var total uint = 0
   a.QueryMutex.Lock()
   for identity, queryAddressMap := range a.QueryAggregationMap {
-    for queryAddress, questionNameMap := range queryAddressMap {
-      for questionName, questionTypeMap := range questionNameMap {
-        for questionType, counter := range questionTypeMap {
+    for queryAddress, questionNameMap := range queryAddressMap.(AggregationMap) {
+      for questionName, questionTypeMap := range questionNameMap.(AggregationMap) {
+        for questionType, c := range questionTypeMap.(AggregationMap) {
+					counter := c.(*Counter)
           log.Debug.Printf("Aggregator query: %s %s %s %s %d\n", 
                             identity, queryAddress, questionName, questionType, counter)
           query := Query{
+            QueryTime: counter.Timestamp,
             Identity: identity,
             QueryAddress: queryAddress,
-            QueryTime: counter.Timestamp,
             QuestionName: questionName,
             QuestionType: questionType,
             Counter: counter.Counter,
@@ -253,11 +209,11 @@ func (a *Aggregator) BuildQueryAggregationList() {
           total++
           log.Debug.Printf("List Push query : %s", query)
         }
-        clear(questionTypeMap)
+        clear(questionTypeMap.(AggregationMap))
       }
-      clear(questionNameMap)
+      clear(questionNameMap.(AggregationMap))
     }
-    clear(queryAddressMap)
+    clear(queryAddressMap.(AggregationMap))
   }
   clear(a.QueryAggregationMap)
   a.QueryMutex.Unlock()
@@ -273,17 +229,18 @@ func (a *Aggregator) BuildResponseAggregationList() {
   var total uint = 0
   a.ResponseMutex.Lock()
   for identity, responseStatusMap := range a.ResponseAggregationMap {
-    for responseStatus, queryAddressMap := range responseStatusMap {
-      for queryAddress, questionNameMap := range queryAddressMap {
-        for questionName, questionTypeMap := range questionNameMap {
-          for questionType, counter := range questionTypeMap {
+    for responseStatus, queryAddressMap := range responseStatusMap.(AggregationMap) {
+      for queryAddress, questionNameMap := range queryAddressMap.(AggregationMap) {
+        for questionName, questionTypeMap := range questionNameMap.(AggregationMap) {
+          for questionType, c := range questionTypeMap.(AggregationMap) {
+					  counter := c.(*Counter)
             log.Debug.Printf("Aggregator response: %s %s %s %s %s %d\n", 
               identity, responseStatus, queryAddress, questionName, questionType, counter)
             response := Response{
-              Identity: identity,
-              QueryAddress: queryAddress,
               ResponseTime: counter.Timestamp,
+              Identity: identity,
               ResponseStatus: responseStatus,
+              QueryAddress: queryAddress,
               QuestionName: questionName,
               QuestionType: questionType,
               Counter: counter.Counter,
@@ -292,13 +249,13 @@ func (a *Aggregator) BuildResponseAggregationList() {
             total++
             log.Debug.Printf("List Push response : %s", response)
           }
-          clear(questionTypeMap)
+          clear(questionTypeMap.(AggregationMap))
         }
-        clear(questionNameMap)
+        clear(questionNameMap.(AggregationMap))
       }
-      clear(queryAddressMap)
+      clear(queryAddressMap.(AggregationMap))
     }
-    clear(responseStatusMap)
+    clear(responseStatusMap.(AggregationMap))
   }
   clear(a.ResponseAggregationMap)
   a.ResponseMutex.Unlock()
