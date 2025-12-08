@@ -211,8 +211,8 @@ func (ch *ClickHouse) Run(context context.Context, wg *sync.WaitGroup) {
           log.Error.Printf("%s.\n", err)
           continue 
         }
-        ch.QueryCounter++
         log.Debug.Printf("Batch sent size %d.\n", count)
+        ch.QueryCounter++
       }
     case l, ok := <-ch.ResponseChannel:
       if ok == false { // chan closed
@@ -255,8 +255,8 @@ func (ch *ClickHouse) Run(context context.Context, wg *sync.WaitGroup) {
           log.Error.Printf("%s.\n", err)
           continue 
         }
-        ch.ResponseCounter++
         log.Debug.Printf("Batch sent size %d.\n", count)
+        ch.ResponseCounter++
       }
     }
   }
