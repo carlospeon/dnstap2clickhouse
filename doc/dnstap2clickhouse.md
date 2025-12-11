@@ -63,11 +63,12 @@ GroupbyQuestion = true
 
 [ClickHouse]
 # Connection options
-Host = "localhost"
-Port = 9000
+# Hosts = "host1:port1,host2:port2..."
+Hosts = "localhost:9440"
 Username = "default"
 Password = ""
 Database = "default"
+InsecureSkipVerify = "false"
 
 # QueryTable. Table to insert client queries.
 QueryTable = "clientQuery"

@@ -22,7 +22,9 @@ package clickhouse
 import (
   "container/list"
   "context"
+  "crypto/tls"
   "fmt"
+  "strings"
   "sync"
   "time"
 
@@ -39,8 +41,9 @@ const RETRY_INTERVAL_STEP = 10
 const RETRY_MAX_ITEMS = 16
 
 type Config struct {
-  Host string
-  Port int
+  Hosts string
+  Secure bool
+  InsecureSkipVerify bool
   Username string
   Password string
   Database string
@@ -67,7 +70,7 @@ type ClickHouse struct {
 
 func Init(ch *ClickHouse) (*ClickHouse) {
   ch.ConnOptions = clickhouse.Options{
-    Addr: []string{fmt.Sprintf("%s:%d", ch.Config.Host, ch.Config.Port)},
+    Addr: strings.Split(ch.Config.Hosts, ","),
     Auth: clickhouse.Auth{
         Database: ch.Config.Database,
         Username: ch.Config.Username,
@@ -83,10 +86,15 @@ func Init(ch *ClickHouse) (*ClickHouse) {
     MaxOpenConns:     2,
     MaxIdleConns:     2,
     ConnMaxLifetime:  time.Duration(8) * time.Hour, 
-    BlockBufferSize: 10,
+    BlockBufferSize:  10,
   } 
+
+  if ch.Config.Secure {
+    ch.ConnOptions.TLS = &tls.Config {
+      InsecureSkipVerify: ch.Config.InsecureSkipVerify }
+  }
   ch.ReadChannel = make(chan *aggregator.MessageList, 8)
-  log.Debug.Printf("ClickHouse Client created: %s:%d.\n", ch.Config.Host, ch.Config.Port)
+  log.Debug.Printf("ClickHouse Client created: %s", ch.Config.Hosts)
   return ch
 }
 

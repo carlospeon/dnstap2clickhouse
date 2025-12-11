@@ -50,8 +50,9 @@ var Defaults = Config {
     GroupbyQuestion: true,
   },
   ClickHouse: clickhouse.Config{
-    Host: "localhost",
-    Port: 9000,
+    Hosts: "localhost:9000",
+    Secure: false,
+    InsecureSkipVerify: false,
     Username: "default",
     Password: "",
     Database: "default",
