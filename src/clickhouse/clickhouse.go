@@ -34,6 +34,10 @@ import (
 
 )
 
+const RETRY_MAX_INTERVAL = 300
+const RETRY_INTERVAL_STEP = 10
+const RETRY_MAX_ITEMS = 16
+
 type Config struct {
   Host string
   Port int
@@ -56,8 +60,7 @@ type ClickHouse struct {
   Config Config
   Conn clickhouse.Conn
   ConnOptions clickhouse.Options
-  QueryChannel chan *list.List
-  ResponseChannel chan *list.List
+  ReadChannel chan *aggregator.MessageList
   QueryCounter uint
   ResponseCounter uint
 }
@@ -82,15 +85,13 @@ func Init(ch *ClickHouse) (*ClickHouse) {
     ConnMaxLifetime:  time.Duration(8) * time.Hour, 
     BlockBufferSize: 10,
   } 
-  ch.QueryChannel = make(chan *list.List, 8)
-  ch.ResponseChannel = make(chan *list.List, 8)
+  ch.ReadChannel = make(chan *aggregator.MessageList, 8)
   log.Debug.Printf("ClickHouse Client created: %s:%d.\n", ch.Config.Host, ch.Config.Port)
   return ch
 }
 
 func (ch *ClickHouse) Close() {
-  close(ch.QueryChannel)
-  close(ch.ResponseChannel)
+  close(ch.ReadChannel)
   if ch.Conn != nil {
     ch.Conn.Close()
   }
@@ -111,6 +112,142 @@ func appendColumnValue(cols *[]any, name *string, c any) {
     *cols = append(*cols, c)
   }
 }
+
+func (ch *ClickHouse) initQueryStmt() (string, uint) {
+  stmt := fmt.Sprintf("INSERT INTO %s (", ch.Config.QueryTable)
+  numberCols := uint(0)
+  appendColumnName(&stmt, &ch.Config.QueryTimeColumn, &numberCols)
+  appendColumnName(&stmt, &ch.Config.IdentityColumn, &numberCols)
+  appendColumnName(&stmt, &ch.Config.QueryAddressColumn, &numberCols)
+  appendColumnName(&stmt, &ch.Config.QuestionNameColumn, &numberCols)
+  appendColumnName(&stmt, &ch.Config.QuestionTypeColumn, &numberCols)
+  appendColumnName(&stmt, &ch.Config.CounterColumn, &numberCols)
+  stmt += ")"
+  log.Debug.Printf("Insert statement %s", stmt)
+  return stmt, numberCols
+}
+func (ch *ClickHouse) initResponseStmt() (string, uint) {
+  stmt := fmt.Sprintf("INSERT INTO %s (", ch.Config.ResponseTable)
+  numberCols := uint(0)
+  appendColumnName(&stmt, &ch.Config.ResponseTimeColumn, &numberCols)
+  appendColumnName(&stmt, &ch.Config.IdentityColumn, &numberCols)
+  appendColumnName(&stmt, &ch.Config.ResponseStatusColumn, &numberCols)
+  appendColumnName(&stmt, &ch.Config.QueryAddressColumn, &numberCols)
+  appendColumnName(&stmt, &ch.Config.QuestionNameColumn, &numberCols)
+  appendColumnName(&stmt, &ch.Config.QuestionTypeColumn, &numberCols)
+  appendColumnName(&stmt, &ch.Config.CounterColumn, &numberCols)
+  stmt += ")"
+  log.Debug.Printf("Insert statement %s", stmt)
+  return stmt, numberCols
+}
+
+func (ch *ClickHouse) writeQueryStmt(context context.Context,
+                                     stmt string, numberCols uint,
+                                     m *aggregator.MessageList) (uint, error) {
+  var count uint = 0
+  l := m.List
+  if l == nil {
+    return 0, nil
+  }
+  batch, err := ch.Conn.PrepareBatch(context, stmt,
+    driver.WithReleaseConnection())
+  if err != nil {
+    return 0, err
+  }
+  for e := l.Front(); e != nil; e = e.Next() {
+    q := e.Value.(*aggregator.Query)
+    var columns = make([]any, 0, numberCols)
+    appendColumnValue(&columns, &ch.Config.QueryTimeColumn, q.QueryTime)
+    appendColumnValue(&columns, &ch.Config.IdentityColumn, q.Identity)
+    appendColumnValue(&columns, &ch.Config.QueryAddressColumn, q.QueryAddress)
+    appendColumnValue(&columns, &ch.Config.QuestionNameColumn, q.QuestionName)
+    appendColumnValue(&columns, &ch.Config.QuestionTypeColumn, q.QuestionType)
+    appendColumnValue(&columns, &ch.Config.CounterColumn, q.Counter)
+    log.Debug.Printf("Batch sent size.\n", columns...)
+    err = batch.Append(columns...)
+    if err != nil {
+      log.Error.Printf("%s.\n", err)
+      continue
+    }
+    count++
+  }
+  if count > 0 {
+    err = batch.Send()
+    if err != nil {
+      return 0, err
+    }
+    ch.QueryCounter++
+    log.Debug.Printf("Batch sent size %d.\n", count)
+  }
+  return count, nil
+}
+
+func (ch *ClickHouse) writeResponseStmt(context context.Context,
+                                        stmt string, numberCols uint,
+                                        m *aggregator.MessageList) (uint, error) {
+  var count uint = 0
+  l := m.List
+  if l == nil {
+    return 0, nil
+  }
+  batch, err := ch.Conn.PrepareBatch(context, stmt,
+    driver.WithReleaseConnection())
+  if err != nil {
+    log.Error.Printf("%s.\n", err)
+    return 0, err
+  }
+  for e := l.Front(); e != nil; e = e.Next() {
+    r := e.Value.(*aggregator.Response)
+    var columns = make([]any, 0, numberCols)
+    appendColumnValue(&columns, &ch.Config.ResponseTimeColumn, r.ResponseTime)
+    appendColumnValue(&columns, &ch.Config.IdentityColumn, r.Identity)
+    appendColumnValue(&columns, &ch.Config.ResponseStatusColumn, r.ResponseStatus)
+    appendColumnValue(&columns, &ch.Config.QueryAddressColumn, r.QueryAddress)
+    appendColumnValue(&columns, &ch.Config.QuestionNameColumn, r.QuestionName)
+    appendColumnValue(&columns, &ch.Config.QuestionTypeColumn, r.QuestionType)
+    appendColumnValue(&columns, &ch.Config.CounterColumn, r.Counter)
+    log.Debug.Printf("Batch sent size.\n", columns...)
+    err = batch.Append(columns...)
+    if err != nil {
+      log.Error.Printf("%s.\n", err)
+      return 0, err
+    }
+    count++
+  }
+  if count > 0 {
+    err = batch.Send()
+    if err != nil {
+      log.Error.Printf("%s.\n", err)
+      return 0, err
+    }
+    ch.ResponseCounter++
+    log.Debug.Printf("Batch sent size %d.\n", count)
+  }
+  return count, nil
+}
+func (ch *ClickHouse) writeMessageList(context context.Context,
+                                       queryStmt string,
+                                       numberQueryCols uint,
+                                       responseStmt string,
+                                       numberResponseCols uint,
+                                       m *aggregator.MessageList) error {
+  switch m.Type {
+  case aggregator.QueryType:
+    log.Debug.Printf("Readed query list")
+    _, err := ch.writeQueryStmt(context, queryStmt, numberQueryCols, m)
+    if err != nil {
+      return err
+    }
+  case aggregator.ResponseType:
+    log.Debug.Printf("Readed response list")
+    _, err := ch.writeResponseStmt(context, responseStmt, numberResponseCols, m)
+    if err != nil {
+      return err
+    }
+  }
+  return nil
+}
+
 func (ch *ClickHouse) Run(context context.Context, wg *sync.WaitGroup) {
   defer wg.Done()
   defer ch.Close()
@@ -136,127 +273,70 @@ func (ch *ClickHouse) Run(context context.Context, wg *sync.WaitGroup) {
     log.Error.Printf("%s.\n", err)
     return;
   }
-
-  queryStmt := fmt.Sprintf("INSERT INTO %s (", ch.Config.QueryTable)
-  numberQueryCols := uint(0)
-  appendColumnName(&queryStmt, &ch.Config.QueryTimeColumn, &numberQueryCols)
-  appendColumnName(&queryStmt, &ch.Config.IdentityColumn, &numberQueryCols)
-  appendColumnName(&queryStmt, &ch.Config.QueryAddressColumn, &numberQueryCols)
-  appendColumnName(&queryStmt, &ch.Config.QuestionNameColumn, &numberQueryCols)
-  appendColumnName(&queryStmt, &ch.Config.QuestionTypeColumn, &numberQueryCols)
-  appendColumnName(&queryStmt, &ch.Config.CounterColumn, &numberQueryCols)
-  queryStmt += ")"
-  log.Debug.Printf("Insert statement %s", queryStmt)
+  queryStmt, numberQueryCols := ch.initQueryStmt()
   if numberQueryCols == 0 {
     log.Warn.Printf("No columns to insert queries")
   }
 
-  responseStmt := fmt.Sprintf("INSERT INTO %s (", ch.Config.ResponseTable)
-  numberResponseCols := uint(0)
-  appendColumnName(&responseStmt, &ch.Config.ResponseTimeColumn, &numberResponseCols)
-  appendColumnName(&responseStmt, &ch.Config.IdentityColumn, &numberResponseCols)
-  appendColumnName(&responseStmt, &ch.Config.ResponseStatusColumn, &numberResponseCols)
-  appendColumnName(&responseStmt, &ch.Config.QueryAddressColumn, &numberResponseCols)
-  appendColumnName(&responseStmt, &ch.Config.QuestionNameColumn, &numberResponseCols)
-  appendColumnName(&responseStmt, &ch.Config.QuestionTypeColumn, &numberResponseCols)
-  appendColumnName(&responseStmt, &ch.Config.CounterColumn, &numberResponseCols)
-  responseStmt += ")"
-  log.Debug.Printf("Insert statement %s", responseStmt)
+  responseStmt, numberResponseCols := ch.initResponseStmt()
   if numberResponseCols == 0 {
     log.Warn.Printf("No columns to insert queries")
     return
   }
 
+  retryTimer := time.NewTimer(0)
+  retryInterval := 0
+  retryList := list.New()
+
   for {  
     select {
     case <-context.Done():
       return
-    case l, ok := <-ch.QueryChannel:
+    case m, ok := <-ch.ReadChannel:
       if ok == false { // chan closed
         log.Warn.Printf("Query channel closed.\n")
         return
       }
-      log.Debug.Printf("Readed query list")
-      if l == nil {
-        continue
-      }
+      retryLen := retryList.Len()
 
-      batch, err := ch.Conn.PrepareBatch(context, queryStmt,
-        driver.WithReleaseConnection())
-      if err != nil {
-        log.Error.Printf("%s.\n", err)
+      if retryLen >= RETRY_MAX_ITEMS {
+        // discard
+        log.Debug.Printf("Retry list full")
         continue
       }
-      var count uint = 0
-      for e := l.Front(); e != nil; e = e.Next() {
-        q := e.Value.(*aggregator.Query)
-        var columns = make([]any, 0, numberQueryCols)
-        appendColumnValue(&columns, &ch.Config.QueryTimeColumn, q.QueryTime)
-        appendColumnValue(&columns, &ch.Config.IdentityColumn, q.Identity)
-        appendColumnValue(&columns, &ch.Config.QueryAddressColumn, q.QueryAddress)
-        appendColumnValue(&columns, &ch.Config.QuestionNameColumn, q.QuestionName)
-        appendColumnValue(&columns, &ch.Config.QuestionTypeColumn, q.QuestionType)
-        appendColumnValue(&columns, &ch.Config.CounterColumn, q.Counter)
-        log.Debug.Printf("Batch sent size.\n", columns...)
-        err = batch.Append(columns...)
-        if err != nil {
-          log.Error.Printf("%s.\n", err)
-          continue
-        }
-        count++
-      }
-      if count > 0 {
-        err = batch.Send()
-        if err != nil {
-          log.Error.Printf("%s.\n", err)
-          continue 
-        }
-        log.Debug.Printf("Batch sent size %d.\n", count)
-        ch.QueryCounter++
-      }
-    case l, ok := <-ch.ResponseChannel:
-      if ok == false { // chan closed
-        log.Warn.Printf("Response channel closed.\n")
-        return
-      }
-      log.Debug.Printf("Readed response list")
-      if l == nil {
+      if retryLen > 0 {
+        // continue enqueing
+        retryList.PushBack(m)
         continue
       }
+      // retryLen = 0, process normaly
 
-      batch, err := ch.Conn.PrepareBatch(context, responseStmt,
-        driver.WithReleaseConnection())
+      err := ch.writeMessageList(context, queryStmt, numberQueryCols,
+                                 responseStmt, numberResponseCols, m)
       if err != nil {
-        log.Error.Printf("%s.\n", err)
+        log.Error.Printf("%s retrying...", err)
+        retryInterval = RETRY_INTERVAL_STEP
+        log.Debug.Printf("Reset retry timer to %d seconds", retryInterval)
+        retryTimer.Reset(time.Duration(retryInterval) * time.Second)
+        retryList.PushBack(m)
         continue
       }
-      var count uint = 0
-      for e := l.Front(); e != nil; e = e.Next() {
-        r := e.Value.(*aggregator.Response)
-        var columns = make([]any, 0, numberResponseCols)
-        appendColumnValue(&columns, &ch.Config.ResponseTimeColumn, r.ResponseTime)
-        appendColumnValue(&columns, &ch.Config.IdentityColumn, r.Identity)
-        appendColumnValue(&columns, &ch.Config.ResponseStatusColumn, r.ResponseStatus)
-        appendColumnValue(&columns, &ch.Config.QueryAddressColumn, r.QueryAddress)
-        appendColumnValue(&columns, &ch.Config.QuestionNameColumn, r.QuestionName)
-        appendColumnValue(&columns, &ch.Config.QuestionTypeColumn, r.QuestionType)
-        appendColumnValue(&columns, &ch.Config.CounterColumn, r.Counter)
-        log.Debug.Printf("Batch sent size.\n", columns...)
-        err = batch.Append(columns...)
+    case <-retryTimer.C:
+      for e := retryList.Front(); e != nil; e = retryList.Front()  {
+        m := e.Value.(*aggregator.MessageList)
+        err := ch.writeMessageList(context, queryStmt, numberQueryCols,
+                                   responseStmt, numberResponseCols, m)
         if err != nil {
-          log.Error.Printf("%s.\n", err)
-          continue
+          log.Error.Printf("%s retrying...", err)
+          if retryInterval < RETRY_MAX_INTERVAL {
+            retryInterval += RETRY_INTERVAL_STEP
+          }
+          log.Warn.Printf("Reset retry timer to %d seconds", retryInterval)
+          retryTimer.Reset(time.Duration(retryInterval) * time.Second)
+          break
         }
-        count++
-      }
-      if count > 0 {
-        err = batch.Send()
-        if err != nil {
-          log.Error.Printf("%s.\n", err)
-          continue 
-        }
-        log.Debug.Printf("Batch sent size %d.\n", count)
-        ch.ResponseCounter++
+        retryInterval = 0
+        retryList.Remove(e)
       }
     }
   }

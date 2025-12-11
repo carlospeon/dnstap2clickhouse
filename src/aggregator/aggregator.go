@@ -37,21 +37,6 @@ type Config struct {
   GroupbyQueryAddress bool
   GroupbyQuestion bool
 }
-type Aggregator struct {
-  Config Config
-  ReadQueryChannel chan Query
-  ReadResponseChannel chan Response
-  WriteQueryChannel chan *list.List
-  WriteResponseChannel chan *list.List
-  QueryAggregationMap QueryAggregationMap
-  ResponseAggregationMap ResponseAggregationMap
-  QueryList *list.List
-  ResponseList *list.List
-  QueryMutex *sync.Mutex
-  ResponseMutex *sync.Mutex
-  QueryCounter uint
-  ResponseCounter uint
-}
 
 type Query struct {
   QueryTime time.Time
@@ -62,12 +47,8 @@ type Query struct {
   Counter uint64
 }
 
-func (q Query) getCounter() uint64 {
-  return q.Counter
-}
-func (q Query) setCounter(c uint64) {
-  q.Counter = c
-}
+func (q Query) getCounter() uint64  { return q.Counter }
+func (q Query) setCounter(c uint64) { q.Counter = c }
 
 type Response struct {
   ResponseTime time.Time
@@ -79,16 +60,42 @@ type Response struct {
   Counter uint64
 }
 
-func (r Response) getCounter() uint64 {
-  return r.Counter
-}
-func (r Response) setCounter(c uint64) {
-  r.Counter = c
-}
+func (r Response) getCounter() uint64  { return r.Counter }
+func (r Response) setCounter(c uint64) { r.Counter = c }
 
 type HasCounter interface {
   getCounter() uint64
   setCounter(uint64)
+}
+
+type MessageType int
+const (
+  QueryType      MessageType = iota + 1 // EnumIndex = 1
+  ResponseType                          // EnumIndex = 2
+)
+
+type Message struct {
+  Type MessageType
+  Message any
+}
+
+type MessageList struct {
+  Type MessageType
+  List *list.List
+}
+
+type Aggregator struct {
+  Config Config
+  ReadChannel chan *Message
+  WriteChannel chan *MessageList
+  QueryAggregationMap QueryAggregationMap
+  ResponseAggregationMap ResponseAggregationMap
+  QueryList *list.List
+  ResponseList *list.List
+  QueryMutex *sync.Mutex
+  ResponseMutex *sync.Mutex
+  QueryCounter uint
+  ResponseCounter uint
 }
 
 type Identity = string
@@ -123,8 +130,7 @@ type MapKey interface {
 }
 
 func Init(a *Aggregator) (*Aggregator) {
-  a.ReadQueryChannel = make(chan Query, 256)
-  a.ReadResponseChannel = make(chan Response, 256)
+  a.ReadChannel = make(chan *Message, 256)
   a.QueryAggregationMap = make(QueryAggregationMap)
   a.ResponseAggregationMap = make(ResponseAggregationMap)
   a.QueryMutex = &sync.Mutex{}
@@ -134,8 +140,7 @@ func Init(a *Aggregator) (*Aggregator) {
 }
 
 func (a *Aggregator) Close() {
-  close(a.ReadQueryChannel)
-  close(a.ReadResponseChannel)
+  close(a.ReadChannel)
   clear(a.QueryAggregationMap)
   clear(a.ResponseAggregationMap)
   log.Info.Printf("Aggregator closed.\n")
@@ -298,37 +303,37 @@ func (a *Aggregator) Run (context context.Context, wg *sync.WaitGroup) {
     select {
     case <-context.Done():
       return
-    case q, ok := <-a.ReadQueryChannel:
+    case m, ok := <-a.ReadChannel:
       if !ok { // chan closed
-        log.Warn.Printf("Query Channel closed.\n")
+        log.Warn.Printf("Channel closed.\n")
         return
       }
-      log.Debug.Printf("Readed query: %s.\n", q)
-      if a.Config.Aggregate {
-        a.AggregateQuery(&q)
-      } else {
-        if a.QueryList == nil {
-          log.Debug.Printf("Creating new query list")
-          a.QueryList = list.New()
+      switch m.Type {
+      case QueryType:
+        q := m.Message.(*Query)
+        log.Debug.Printf("Readed query: %s.\n", q)
+        if a.Config.Aggregate {
+          a.AggregateQuery(q)
+        } else {
+          if a.QueryList == nil {
+            log.Debug.Printf("Creating new query list")
+            a.QueryList = list.New()
+          }
+          log.Debug.Printf("Adding new item to query list")
+          a.QueryList.PushBack(q)
         }
-        log.Debug.Printf("Adding new item to query list")
-        a.QueryList.PushBack(&q)
-      }
-    case r, ok := <-a.ReadResponseChannel:
-      if !ok { // chan closed
-        log.Warn.Printf("Response Channel closed.\n")
-        return
-      }
-      log.Debug.Printf("Readed response: %s.\n", r)
-      if a.Config.Aggregate {
-        a.AggregateResponse(&r)
-      } else {
-        if a.ResponseList == nil {
-          log.Debug.Printf("Creating new response list")
-          a.ResponseList = list.New()
+      case ResponseType:
+        r := m.Message.(*Response)
+        if a.Config.Aggregate {
+          a.AggregateResponse(r)
+        } else {
+          if a.ResponseList == nil {
+            log.Debug.Printf("Creating new response list")
+            a.ResponseList = list.New()
+          }
+          log.Debug.Printf("Adding new item to response list")
+          a.ResponseList.PushBack(r)
         }
-        log.Debug.Printf("Adding new item to response list")
-        a.ResponseList.PushBack(&r)
       }
 
     case <-timer.C:
@@ -340,12 +345,14 @@ func (a *Aggregator) Run (context context.Context, wg *sync.WaitGroup) {
       }
       if a.QueryList != nil {
         log.Debug.Printf("Writing list to WriteQueryChannel")
-        a.WriteQueryChannel <- a.QueryList
+        a.WriteChannel <- &MessageList { Type: QueryType,
+                                         List: a.QueryList }
         a.QueryList = nil
       }
       if a.ResponseList != nil {
         log.Debug.Printf("Writing list to WriteResponseChannel")
-        a.WriteResponseChannel <- a.ResponseList
+        a.WriteChannel <- &MessageList { Type: ResponseType,
+                                         List: a.ResponseList }
         a.ResponseList = nil
       }
     }

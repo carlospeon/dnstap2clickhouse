@@ -127,8 +127,8 @@ func run(ctx context.Context, cancel context.CancelFunc) error {
   aggr := aggregator.Init(
     &aggregator.Aggregator{
       Config: cfg.Aggregator,
-      WriteQueryChannel: ch.QueryChannel,
-      WriteResponseChannel: ch.ResponseChannel,
+      WriteChannel: ch.ReadChannel,
+      // WriteResponseChannel: ch.ResponseChannel,
     },
   )
   wg.Add(1)
@@ -137,8 +137,8 @@ func run(ctx context.Context, cancel context.CancelFunc) error {
   dt, err := dnstap.Init(
     &dnstap.Dnstap{ 
       Config: cfg.Dnstap,
-      WriteQueryChannel: aggr.ReadQueryChannel,
-      WriteResponseChannel: aggr.ReadResponseChannel,
+      WriteChannel: aggr.ReadChannel,
+      //WriteResponseChannel: aggr.ReadResponseChannel,
     },
   )
   if err != nil {

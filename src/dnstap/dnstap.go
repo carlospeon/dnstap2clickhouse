@@ -48,8 +48,8 @@ type Config struct {
 
 type Dnstap struct {
   Config Config
-  WriteQueryChannel chan aggregator.Query
-  WriteResponseChannel chan aggregator.Response
+  WriteChannel chan *aggregator.Message
+  //WriteResponseChannel chan aggregator.Response
   Listener net.Listener
   ReadersConns [MAX_READERS]*net.Conn
   ReadersNumber atomic.Uint32
@@ -241,11 +241,6 @@ func (d *Dnstap) Decode(context context.Context,
     }
     msg := dt.Message
 
-    /*
-    if *(msg.Type) != go_dnstap.Message_CLIENT_QUERY {
-      continue
-    }
-    */
     switch *(msg.Type) {
     case go_dnstap.Message_CLIENT_QUERY:
       if !d.Config.ClientQueries {
@@ -283,7 +278,8 @@ func (d *Dnstap) Decode(context context.Context,
         }
 
         log.Debug.Printf("%s", q)
-        d.WriteQueryChannel <- q
+        d.WriteChannel <- &aggregator.Message { Type: aggregator.QueryType,
+                                                Message: &q }
         d.QueryCounter++
         log.Debug.Printf("Dnstap write query: %s", q)
       }
@@ -329,7 +325,8 @@ func (d *Dnstap) Decode(context context.Context,
         }
 
         log.Debug.Printf("%s", r)
-        d.WriteResponseChannel <- r
+        d.WriteChannel <- &aggregator.Message { Type: aggregator.ResponseType,
+                                                Message: &r }
         d.ResponseCounter++
         log.Debug.Printf("Dnstap write response: %s", r)
       }
