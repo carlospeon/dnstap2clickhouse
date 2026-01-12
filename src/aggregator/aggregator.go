@@ -47,8 +47,8 @@ type Query struct {
   Counter uint64
 }
 
-func (q Query) getCounter() uint64  { return q.Counter }
-func (q Query) setCounter(c uint64) { q.Counter = c }
+func (q *Query) getCounter() uint64  { return q.Counter }
+func (q *Query) setCounter(c uint64) { q.Counter = c }
 
 type Response struct {
   ResponseTime time.Time
@@ -60,8 +60,8 @@ type Response struct {
   Counter uint64
 }
 
-func (r Response) getCounter() uint64  { return r.Counter }
-func (r Response) setCounter(c uint64) { r.Counter = c }
+func (r *Response) getCounter() uint64  { return r.Counter }
+func (r *Response) setCounter(c uint64) { r.Counter = c }
 
 type HasCounter interface {
   getCounter() uint64
@@ -147,12 +147,12 @@ func (a *Aggregator) Close() {
 }
 
 func increaseCounter[K MapKey, V HasCounter](
-                     m map[K]*V, key K, value *V) {
+                     m map[K]V, key K, value V) {
   v, ok := m[key]
   if !ok {
     m[key] = value
   } else {
-    (*v).setCounter((*v).getCounter() + (*value).getCounter())
+    v.setCounter(v.getCounter() + value.getCounter())
   }
   log.Debug.Printf("Increase Counter for %+v", key)
 }
