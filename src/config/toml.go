@@ -44,6 +44,7 @@ var Defaults = Config {
   LogLevel: "info",
   Aggregator: aggregator.Config{
     WriteInterval: 20 * time.Second,
+    ResponseTimeAggregationInterval: 0 * time.Second,
     Aggregate: true,
     WriteUngrouped: true,
     GroupbyQueryAddress: true,
@@ -178,7 +179,7 @@ func Load(args map[string]any, filePath string) (Config, error) {
   log.Trace.Printf("toml config loaded: %s", config)
 
 
-	/*
+  /*
   if !config.Aggregator.Aggregate {
     config.ClickHouse.CounterColumn = ""
   }
@@ -191,15 +192,19 @@ func Load(args map[string]any, filePath string) (Config, error) {
   if !config.Aggregator.ClientResponseTimeSample {
     config.ClickHouse.ResponseTimeTable = ""
   }
-	*/
+  */
 
-	config.Aggregator.ClientQueries = config.Dnstap.ClientQueries
-	config.Aggregator.NonOkClientResponses = config.Dnstap.NonOkClientResponses
-	config.Aggregator.ClientResponseTimeSamples = config.Dnstap.ClientResponseTimeSamples 
-	config.ClickHouse.Aggregate = config.Aggregator.Aggregate
-	config.ClickHouse.ClientQueries = config.Dnstap.ClientQueries
-	config.ClickHouse.NonOkClientResponses = config.Dnstap.NonOkClientResponses
-	config.ClickHouse.ClientResponseTimeSamples = config.Dnstap.ClientResponseTimeSamples
+  config.Aggregator.ClientQueries = config.Dnstap.ClientQueries
+  config.Aggregator.NonOkClientResponses = config.Dnstap.NonOkClientResponses
+  config.Aggregator.ClientResponseTimeSamples = config.Dnstap.ClientResponseTimeSamples
+  config.ClickHouse.Aggregate = config.Aggregator.Aggregate
+  config.ClickHouse.ClientQueries = config.Dnstap.ClientQueries
+  config.ClickHouse.NonOkClientResponses = config.Dnstap.NonOkClientResponses
+  config.ClickHouse.ClientResponseTimeSamples = config.Dnstap.ClientResponseTimeSamples
+
+  if config.Aggregator.ResponseTimeAggregationInterval == 0 {
+    config.Aggregator.ResponseTimeAggregationInterval = config.Aggregator.WriteInterval / 2
+  }
 
   printStructFields(log.Info, &config, "Config") 
 

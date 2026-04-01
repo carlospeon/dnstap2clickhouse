@@ -40,6 +40,7 @@ const MAX_QUERY_RESPONSE_SAMPLES = 256
 
 type Config struct {
   WriteInterval time.Duration
+  ResponseTimeAggregationInterval time.Duration
   Aggregate bool
   WriteUngrouped bool
   GroupbyQueryAddress bool
@@ -329,6 +330,19 @@ func isSample[QR HasClientResponseTime](a *Aggregator, qr QR) bool {
   return (qr.getId() & a.QueryResponseTimeSampleMask == 0)
 }
 
+func insertQueryResponseTimeSample[QR HasClientResponseTime](a *Aggregator, key QueryResponseTimeSampleMapKey, qr QR) {
+  mapLen := len(a.QueryResponseTimeSampleMap)
+  log.Trace.Printf("QueryResponseSample map len: %d", mapLen)
+  if mapLen > MAX_QUERY_RESPONSE_MAP_SIZE {
+    a.QueryResponseTimeSampleMapSizeExceeds++
+    if a.QueryResponseTimeSampleMapSizeExceeds == 0 {
+      a.QueryResponseTimeSampleMapSizeExceeds--
+    }
+    return
+  }
+  a.QueryResponseTimeSampleMap[ key ] = qr.getTime()
+  log.Trace.Printf("QueryResponseTimeSample inserting %s", qr)
+}
 func AggregateResponseTimeSample[QR HasClientResponseTime](a *Aggregator, qr QR) {
   if !isSample(a, qr) {
     return
@@ -346,19 +360,7 @@ func AggregateResponseTimeSample[QR HasClientResponseTime](a *Aggregator, qr QR)
     Id: qr.getId() }
   firstQrTime, ok := a.QueryResponseTimeSampleMap[ key ]
   if !ok {
-    mapLen := len(a.QueryResponseTimeSampleMap)
-    log.Trace.Printf("QueryResponseSample map len: %d", mapLen)
-    if mapLen > MAX_QUERY_RESPONSE_MAP_SIZE {
-      a.QueryResponseTimeSampleMapSizeExceeds++
-      if a.QueryResponseTimeSampleMapSizeExceeds == 0 {
-        a.QueryResponseTimeSampleMapSizeExceeds--
-      }
-      return
-    }
-    a.QueryResponseTimeSampleMap[ key ] = qr.getTime()
-    log.Trace.Printf("QueryResponseTimeSample not found, inserting time: %s",
-      qr.isResponse(), key)
-
+    insertQueryResponseTimeSample(a, key, qr)
     return
   }
   var responseTimeSampleMicroSecI int64
@@ -373,7 +375,9 @@ func AggregateResponseTimeSample[QR HasClientResponseTime](a *Aggregator, qr QR)
   }
   responseTimeSampleMicroSecI = responseTime.Sub(queryTime).Microseconds()
   if responseTimeSampleMicroSecI < 0 {
-		log.Warn.Printf("ResponseTimeDelta < 0: %s", qr)
+    log.Warn.Printf("ResponseTimeDelta < 0: %s", qr)
+    // colision: discard old sample and insert new
+    insertQueryResponseTimeSample(a, key, qr)
     return
   }
   delete(a.QueryResponseTimeSampleMap, key)
@@ -495,9 +499,9 @@ func (a *Aggregator) BuildResponseTimeSampleAggregationList() {
   }
   clear(a.ResponseTimeSampleMap)
   
-  now := time.Now()
+  ttl := time.Now().Add(-a.Config.ResponseTimeAggregationInterval)
   for qrtsk, t := range a.QueryResponseTimeSampleMap {
-    if t.Add(a.Config.WriteInterval).Before(now) {
+    if t.Before(ttl) {
       delete(a.QueryResponseTimeSampleMap, qrtsk)
     }
   }
@@ -521,8 +525,7 @@ func (a *Aggregator) Run (context context.Context, wg *sync.WaitGroup) {
   log.Debug.Printf("Running aggregator with interval %s\n", a.Config.WriteInterval)
 
   timer := time.NewTimer(a.Config.WriteInterval)
-  samplesInterval := a.Config.WriteInterval / 2
-  samplesTimer := time.NewTimer(samplesInterval)
+  samplesTimer := time.NewTimer(a.Config.ResponseTimeAggregationInterval)
   for {
     select {
     case <-context.Done():
@@ -576,8 +579,8 @@ func (a *Aggregator) Run (context context.Context, wg *sync.WaitGroup) {
       }
 
     case <-samplesTimer.C:
-      log.Debug.Printf("Aggregator: fired samples interval %s", samplesInterval)
-      samplesTimer.Reset(samplesInterval)
+      log.Debug.Printf("Aggregator: fired samples interval %s", a.Config.ResponseTimeAggregationInterval)
+      samplesTimer.Reset(a.Config.ResponseTimeAggregationInterval)
       if a.Config.ClientResponseTimeSamples {
         a.BuildResponseTimeSampleAggregationList()
       }
