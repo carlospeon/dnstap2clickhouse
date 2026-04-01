@@ -178,22 +178,6 @@ func Load(args map[string]any, filePath string) (Config, error) {
   }
   log.Trace.Printf("toml config loaded: %s", config)
 
-
-  /*
-  if !config.Aggregator.Aggregate {
-    config.ClickHouse.CounterColumn = ""
-  }
-  if !config.Dnstap.ClientQueries {
-    config.ClickHouse.QueryTable = ""
-  }
-  if !config.Dnstap.NonOkClientResponses {
-    config.ClickHouse.ResponseTable = ""
-  }
-  if !config.Aggregator.ClientResponseTimeSample {
-    config.ClickHouse.ResponseTimeTable = ""
-  }
-  */
-
   config.Aggregator.ClientQueries = config.Dnstap.ClientQueries
   config.Aggregator.NonOkClientResponses = config.Dnstap.NonOkClientResponses
   config.Aggregator.ClientResponseTimeSamples = config.Dnstap.ClientResponseTimeSamples

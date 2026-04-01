@@ -22,8 +22,9 @@ package aggregator
 import (
   "container/list"
   "context"
-  "time"
+  "math/rand"
   "sync"
+  "time"
 
   "dnstap2clickhouse/src/log"
 )
@@ -138,6 +139,7 @@ type Aggregator struct {
   QueryAggregationMap QueryAggregationMap
   ResponseAggregationMap ResponseAggregationMap
   QueryResponseTimeSampleMap QueryResponseTimeSampleMap
+  QueryResponseTimeSampleMapSizeExceeds uint64
   ResponseTimeSampleMap ResponseTimeSampleMap
   QueryList *list.List
   ResponseList *list.List
@@ -146,7 +148,8 @@ type Aggregator struct {
   ResponseMutex *sync.Mutex
   ResponseTimeSampleMutex *sync.Mutex
   QueryResponseTimeSampleMask DnsIdType
-  QueryResponseTimeSampleMapSizeExceeds uint64
+  QueryResponseTimeSampleMatch DnsIdType
+  QueryResponseTimeSampleMatchMasked DnsIdType
   Counters Stats
 }
 
@@ -205,8 +208,11 @@ func Init(a *Aggregator) (*Aggregator) {
   a.QueryMutex = &sync.Mutex{}
   a.ResponseMutex = &sync.Mutex{}
   a.ResponseTimeSampleMutex = &sync.Mutex{}
-  a.QueryResponseTimeSampleMask = 0
   a.QueryResponseTimeSampleMapSizeExceeds = 0
+  a.QueryResponseTimeSampleMask = 0
+  rand.Seed(time.Now().UnixNano())
+  a.QueryResponseTimeSampleMatch = uint16(rand.Intn(1 << 16))
+  a.QueryResponseTimeSampleMatchMasked = 0
 
   return a
 }
@@ -327,7 +333,7 @@ func isSample[QR HasClientResponseTime](a *Aggregator, qr QR) bool {
   if a.QueryResponseTimeSampleMask == 0 {
     return true
   }
-  return (qr.getId() & a.QueryResponseTimeSampleMask == 0)
+  return (qr.getId() & a.QueryResponseTimeSampleMask == a.QueryResponseTimeSampleMatchMasked)
 }
 
 func insertQueryResponseTimeSample[QR HasClientResponseTime](a *Aggregator, key QueryResponseTimeSampleMapKey, qr QR) {
@@ -456,6 +462,7 @@ func (a *Aggregator) tuneMask(samples uint64) {
     } else {
       // not overflow
       a.QueryResponseTimeSampleMask = checkOverflow * 2 - 1
+      a.QueryResponseTimeSampleMatchMasked = a.QueryResponseTimeSampleMatch & a.QueryResponseTimeSampleMask
       maskLog = "larger"
     }
   } else if a.QueryResponseTimeSampleMapSizeExceeds == 0 && a.QueryResponseTimeSampleMask != 0 &&
@@ -465,6 +472,7 @@ func (a *Aggregator) tuneMask(samples uint64) {
     } else {
       checkOverflow := a.QueryResponseTimeSampleMask + 1
       a.QueryResponseTimeSampleMask = checkOverflow / 2 - 1
+      a.QueryResponseTimeSampleMatchMasked = a.QueryResponseTimeSampleMatch & a.QueryResponseTimeSampleMask
     }
     maskLog = "shorter"
   }
