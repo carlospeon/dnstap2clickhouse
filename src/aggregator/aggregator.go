@@ -373,7 +373,7 @@ func AggregateResponseTimeSample[QR HasClientResponseTime](a *Aggregator, qr QR)
   }
   responseTimeSampleMicroSecI = responseTime.Sub(queryTime).Microseconds()
   if responseTimeSampleMicroSecI < 0 {
-    log.Warn.Printf("ResponseTime < 0")
+		log.Warn.Printf("ResponseTimeDelta < 0: %s", qr)
     return
   }
   delete(a.QueryResponseTimeSampleMap, key)
