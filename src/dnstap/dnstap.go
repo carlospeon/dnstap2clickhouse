@@ -47,6 +47,10 @@ type Config struct {
   ClientResponseTimeSamples bool
 }
 
+type Stats struct {
+	Queries uint
+	Responses uint
+}
 type Dnstap struct {
   Config Config
   WriteChannel chan *aggregator.Message
@@ -55,8 +59,7 @@ type Dnstap struct {
   ReadersConns [MAX_READERS]*net.Conn
   ReadersNumber atomic.Uint32
   ConnChannel chan *net.Conn
-  QueryCounter uint
-  ResponseCounter uint
+	Counters Stats
 }
 
 func Init(d *Dnstap) (*Dnstap, error) {
@@ -299,7 +302,7 @@ func (d *Dnstap) Decode(context context.Context,
         log.Debug.Printf("%s", q)
         d.WriteChannel <- &aggregator.Message { Type: aggregator.QueryType,
                                                 Message: &q }
-        d.QueryCounter++
+        d.Counters.Queries++
         log.Debug.Printf("Dnstap write query: %s", q)
       }
     case go_dnstap.Message_CLIENT_RESPONSE:
@@ -364,7 +367,7 @@ func (d *Dnstap) Decode(context context.Context,
         log.Debug.Printf("%s", r)
         d.WriteChannel <- &aggregator.Message { Type: aggregator.ResponseType,
                                                 Message: &r }
-        d.ResponseCounter++
+        d.Counters.Responses++
         log.Debug.Printf("Dnstap write response: %s", r)
       }
     default:
@@ -374,10 +377,10 @@ func (d *Dnstap) Decode(context context.Context,
   }
 }
 
-func (d *Dnstap) Stats() (uint, uint) {
-  queryCounter := d.QueryCounter
-  responseCounter := d.ResponseCounter
-  d.QueryCounter = 0
-  d.ResponseCounter = 0
-  return queryCounter, responseCounter
+func (d *Dnstap) GetStats() Stats {
+	stats := d.Counters
+	d.Counters.Queries = 0
+	d.Counters.Responses = 0
+ 
+  return stats
 }

@@ -46,7 +46,7 @@ type Config struct {
   GroupbyQuestion bool
   ClientQueries bool
   NonOkClientResponses bool
-	ClientResponseTimeSamples bool
+  ClientResponseTimeSamples bool
 }
 
 type DnsIdType = uint16
@@ -79,7 +79,7 @@ type Response struct {
   QuestionName string
   QuestionType string
   Id DnsIdType
-	IsSuccess bool
+  IsSuccess bool
   Counter uint64
 }
 
@@ -93,12 +93,12 @@ func (r *Response) getCounter() uint64  { return r.Counter }
 func (r *Response) setCounter(c uint64) { r.Counter = c }
 
 type HasClientResponseTime interface {
-	isResponse() bool
-	getIdentity() string
-	getQueryAddress() string
-	getQueryPort() uint32
-	getId() DnsIdType
-	getTime() time.Time
+  isResponse() bool
+  getIdentity() string
+  getQueryAddress() string
+  getQueryPort() uint32
+  getId() DnsIdType
+  getTime() time.Time
 }
 
 type HasCounter interface {
@@ -123,6 +123,13 @@ type MessageList struct {
   List *list.List
 }
 
+type Stats struct {
+  Queries uint64
+  Responses uint64
+  ResponseTimes uint64
+  Samples uint64
+  QueryResponseTimeSampleMapSizeExceeds uint64
+}
 type Aggregator struct {
   Config Config
   ReadChannel chan *Message
@@ -137,11 +144,9 @@ type Aggregator struct {
   QueryMutex *sync.Mutex
   ResponseMutex *sync.Mutex
   ResponseTimeSampleMutex *sync.Mutex
-  QueryCounter uint
-  ResponseCounter uint
-  ResponseTimeSampleCounter uint
-	QueryResponseTimeSampleMask DnsIdType
-	QueryResponseTimeSampleMapSizeExceeds uint32
+  QueryResponseTimeSampleMask DnsIdType
+  QueryResponseTimeSampleMapSizeExceeds uint64
+  Counters Stats
 }
 
 type Identity = string
@@ -174,7 +179,7 @@ type QueryResponseTimeSampleMapKey struct {
   Id DnsIdType
 }
 type ResponseTimeSample struct {
-	ResponseTime time.Time
+  ResponseTime time.Time
   Identity string
   ResponseTimeMicroSec uint64
   Counter uint64
@@ -199,8 +204,8 @@ func Init(a *Aggregator) (*Aggregator) {
   a.QueryMutex = &sync.Mutex{}
   a.ResponseMutex = &sync.Mutex{}
   a.ResponseTimeSampleMutex = &sync.Mutex{}
-	a.QueryResponseTimeSampleMask = 0
-	a.QueryResponseTimeSampleMapSizeExceeds = 0
+  a.QueryResponseTimeSampleMask = 0
+  a.QueryResponseTimeSampleMapSizeExceeds = 0
 
   return a
 }
@@ -318,21 +323,21 @@ func (a *Aggregator) AggregateResponse(r *Response) {
 }
 
 func isSample[QR HasClientResponseTime](a *Aggregator, qr QR) bool {
-	if a.QueryResponseTimeSampleMask == 0 {
-		return true
-	}
+  if a.QueryResponseTimeSampleMask == 0 {
+    return true
+  }
   return (qr.getId() & a.QueryResponseTimeSampleMask == 0)
 }
 
 func AggregateResponseTimeSample[QR HasClientResponseTime](a *Aggregator, qr QR) {
-	if !isSample(a, qr) {
-		return
-	}
+  if !isSample(a, qr) {
+    return
+  }
 
   a.ResponseTimeSampleMutex.Lock()
   defer a.ResponseTimeSampleMutex.Unlock()
 
-	log.Trace.Printf("QueryResponseTimeSample isResponse: %s", qr.isResponse())
+  log.Trace.Printf("QueryResponseTimeSample isResponse: %s", qr.isResponse())
 
   key := QueryResponseTimeSampleMapKey {
     Identity: qr.getIdentity(),
@@ -341,47 +346,47 @@ func AggregateResponseTimeSample[QR HasClientResponseTime](a *Aggregator, qr QR)
     Id: qr.getId() }
   firstQrTime, ok := a.QueryResponseTimeSampleMap[ key ]
   if !ok {
-	  mapLen := len(a.QueryResponseTimeSampleMap)
-	  log.Trace.Printf("QueryResponseSample map len: %d", mapLen)
-	  if mapLen > MAX_QUERY_RESPONSE_MAP_SIZE {
-			a.QueryResponseTimeSampleMapSizeExceeds++
-			if a.QueryResponseTimeSampleMapSizeExceeds == 0 {
-				a.QueryResponseTimeSampleMapSizeExceeds--
-			}
-		  return
-	  }
+    mapLen := len(a.QueryResponseTimeSampleMap)
+    log.Trace.Printf("QueryResponseSample map len: %d", mapLen)
+    if mapLen > MAX_QUERY_RESPONSE_MAP_SIZE {
+      a.QueryResponseTimeSampleMapSizeExceeds++
+      if a.QueryResponseTimeSampleMapSizeExceeds == 0 {
+        a.QueryResponseTimeSampleMapSizeExceeds--
+      }
+      return
+    }
     a.QueryResponseTimeSampleMap[ key ] = qr.getTime()
-		log.Trace.Printf("QueryResponseTimeSample not found, inserting time: %s", 
-		  qr.isResponse(), key)
+    log.Trace.Printf("QueryResponseTimeSample not found, inserting time: %s",
+      qr.isResponse(), key)
 
     return
   }
-	var responseTimeSampleMicroSecI int64
-	var queryTime time.Time
-	var responseTime time.Time
-	if qr.isResponse() {
-		queryTime = firstQrTime
-		responseTime = qr.getTime()
-	} else {
-		queryTime = qr.getTime()
-		responseTime = firstQrTime
+  var responseTimeSampleMicroSecI int64
+  var queryTime time.Time
+  var responseTime time.Time
+  if qr.isResponse() {
+    queryTime = firstQrTime
+    responseTime = qr.getTime()
+  } else {
+    queryTime = qr.getTime()
+    responseTime = firstQrTime
   }
   responseTimeSampleMicroSecI = responseTime.Sub(queryTime).Microseconds()
-	if responseTimeSampleMicroSecI < 0 {
-		log.Warn.Printf("ResponseTime < 0")
-		return
-	}
+  if responseTimeSampleMicroSecI < 0 {
+    log.Warn.Printf("ResponseTime < 0")
+    return
+  }
   delete(a.QueryResponseTimeSampleMap, key)
-	responseTimeSampleMicroSec := uint64(responseTimeSampleMicroSecI)
-	if log.IsTrace() {
-		log.Trace.Printf("QueryResponseSample response time: %d, map len: %d", 
+  responseTimeSampleMicroSec := uint64(responseTimeSampleMicroSecI)
+  if log.IsTrace() {
+    log.Trace.Printf("QueryResponseSample response time: %d, map len: %d",
       responseTimeSampleMicroSec, len(a.QueryResponseTimeSampleMap))
-	}
+  }
 
   responseTimeSample, ok := a.ResponseTimeSampleMap[qr.getIdentity()]
   if !ok {
     responseTimeSample = &ResponseTimeSample { 
-			ResponseTime: responseTime, 
+      ResponseTime: responseTime,
       Identity: qr.getIdentity(), 
       ResponseTimeMicroSec: responseTimeSampleMicroSec,
       Counter: 1,
@@ -396,7 +401,7 @@ func AggregateResponseTimeSample[QR HasClientResponseTime](a *Aggregator, qr QR)
 func (a *Aggregator) BuildQueryAggregationList() {
   a.QueryList = list.New()
 
-  var total uint = 0
+  var total uint64 = 0
   a.QueryMutex.Lock()
   for _, query := range a.QueryAggregationMap {
     log.Debug.Printf("Aggregator query: %s %s %s %s %d\n",
@@ -412,13 +417,13 @@ func (a *Aggregator) BuildQueryAggregationList() {
     a.QueryList = nil
   }
   log.Debug.Printf("Aggregation List size %d.\n", total)
-  a.QueryCounter += total
+  a.Counters.Queries += total
 }
 
 func (a *Aggregator) BuildResponseAggregationList() {
   a.ResponseList = list.New()
 
-  var total uint = 0
+  var total uint64 = 0
   a.ResponseMutex.Lock()
   for _, response := range a.ResponseAggregationMap {
     log.Debug.Printf("Aggregator response: %s %s %s %s %s %d\n",
@@ -434,51 +439,54 @@ func (a *Aggregator) BuildResponseAggregationList() {
     a.ResponseList = nil
   }
   log.Debug.Printf("Aggregation List size %d.\n", total)
-  a.ResponseCounter += total
+  a.Counters.Responses += total
 }
 
 func (a *Aggregator) tuneMask(samples uint64) {
-	maskLog := "keep"
-	if a.QueryResponseTimeSampleMapSizeExceeds > MAX_QUERY_RESPONSE_MAP_SIZE_EXCEEDS ||
-	   samples > MAX_QUERY_RESPONSE_SAMPLES {
-		checkOverflow := a.QueryResponseTimeSampleMask + 1
-		if checkOverflow == 0 {
+  maskLog := "keep"
+  if a.QueryResponseTimeSampleMapSizeExceeds > MAX_QUERY_RESPONSE_MAP_SIZE_EXCEEDS ||
+     samples > MAX_QUERY_RESPONSE_SAMPLES {
+    checkOverflow := a.QueryResponseTimeSampleMask + 1
+    if checkOverflow == 0 {
       maskLog = "overflow"
-		} else {
-			// not overflow
-			a.QueryResponseTimeSampleMask = checkOverflow * 2 - 1
+    } else {
+      // not overflow
+      a.QueryResponseTimeSampleMask = checkOverflow * 2 - 1
       maskLog = "larger"
-		}
-	} else if a.QueryResponseTimeSampleMapSizeExceeds == 0 && a.QueryResponseTimeSampleMask != 0 &&
-	          samples < MIN_QUERY_RESPONSE_SAMPLES {
-		if a.QueryResponseTimeSampleMask == 1 {
-			a.QueryResponseTimeSampleMask = 0
-		} else {
-	    checkOverflow := a.QueryResponseTimeSampleMask + 1
-		  a.QueryResponseTimeSampleMask = checkOverflow / 2 - 1
-		}
+    }
+  } else if a.QueryResponseTimeSampleMapSizeExceeds == 0 && a.QueryResponseTimeSampleMask != 0 &&
+            samples < MIN_QUERY_RESPONSE_SAMPLES {
+    if a.QueryResponseTimeSampleMask == 1 {
+      a.QueryResponseTimeSampleMask = 0
+    } else {
+      checkOverflow := a.QueryResponseTimeSampleMask + 1
+      a.QueryResponseTimeSampleMask = checkOverflow / 2 - 1
+    }
     maskLog = "shorter"
-	}
+  }
+  a.Counters.QueryResponseTimeSampleMapSizeExceeds += a.QueryResponseTimeSampleMapSizeExceeds
   log.Debug.Printf("QueryResponseTimeSampleMapSize samples %d, exceeded %d times, %s mask %b", 
-	  samples, a.QueryResponseTimeSampleMapSizeExceeds, maskLog, a.QueryResponseTimeSampleMask)
-	a.QueryResponseTimeSampleMapSizeExceeds = 0
+    samples, a.QueryResponseTimeSampleMapSizeExceeds, maskLog, a.QueryResponseTimeSampleMask)
+  a.QueryResponseTimeSampleMapSizeExceeds = 0
 }
 
 func (a *Aggregator) BuildResponseTimeSampleAggregationList() {
 
-  var total uint = 0
-	var samples uint64 = 0
-	if a.ResponseTimeSampleList == nil {
+  var total uint64 = 0
+  var samples uint64 = 0
+  var newList bool = false
+  if a.ResponseTimeSampleList == nil {
     a.ResponseTimeSampleList = list.New()
-	}
+    newList = true
+  }
   a.ResponseTimeSampleMutex.Lock()
   for _, rts := range a.ResponseTimeSampleMap {
-		responseTimeMicroSecAvg := rts.ResponseTimeMicroSec / rts.Counter
-		samples += rts.Counter
-		log.Debug.Printf("Aggregator ResponseTimeSample: %s %d/%d: %d\n",
+    responseTimeMicroSecAvg := rts.ResponseTimeMicroSec / uint64(rts.Counter)
+    samples += rts.Counter
+    log.Debug.Printf("Aggregator ResponseTimeSample: %s %d/%d: %d\n",
                       rts.Identity, rts.ResponseTimeMicroSec, rts.Counter,
-										  responseTimeMicroSecAvg)
-		rts.ResponseTimeMicroSec = responseTimeMicroSecAvg
+                      responseTimeMicroSecAvg)
+    rts.ResponseTimeMicroSec = responseTimeMicroSecAvg
     rts.Counter = 1
     a.ResponseTimeSampleList.PushBack(rts)
     total++
@@ -497,13 +505,14 @@ func (a *Aggregator) BuildResponseTimeSampleAggregationList() {
     log.Trace.Printf("QueryResponseTimeSample map size %d.\n", len(a.QueryResponseTimeSampleMap))
   }
   a.ResponseTimeSampleMutex.Unlock()
-  if total == 0 {
+  if newList && total == 0 {
     a.ResponseTimeSampleList = nil
   }
   log.Debug.Printf("QueryResponseTimeSample List size %d.\n", total)
-  a.ResponseTimeSampleCounter += total
+  a.Counters.ResponseTimes += total
+  a.Counters.Samples += samples
 
-	a.tuneMask(samples)
+  a.tuneMask(samples)
 }
 
 func (a *Aggregator) Run (context context.Context, wg *sync.WaitGroup) {
@@ -512,7 +521,7 @@ func (a *Aggregator) Run (context context.Context, wg *sync.WaitGroup) {
   log.Debug.Printf("Running aggregator with interval %s\n", a.Config.WriteInterval)
 
   timer := time.NewTimer(a.Config.WriteInterval)
-	samplesInterval := a.Config.WriteInterval / 2
+  samplesInterval := a.Config.WriteInterval / 2
   samplesTimer := time.NewTimer(samplesInterval)
   for {
     select {
@@ -527,12 +536,12 @@ func (a *Aggregator) Run (context context.Context, wg *sync.WaitGroup) {
       case QueryType:
         q := m.Message.(*Query)
         log.Debug.Printf("Readed query: %s.\n", q)
-				if a.Config.ClientResponseTimeSamples {
+        if a.Config.ClientResponseTimeSamples {
           AggregateResponseTimeSample(a, q)
-				}
-				if !a.Config.ClientQueries {
-					break
-				}
+        }
+        if !a.Config.ClientQueries {
+          break
+        }
         if a.Config.Aggregate {
           a.AggregateQuery(q)
         } else {
@@ -545,15 +554,15 @@ func (a *Aggregator) Run (context context.Context, wg *sync.WaitGroup) {
         }
       case ResponseType:
         r := m.Message.(*Response)
-				if a.Config.ClientResponseTimeSamples {
+        if a.Config.ClientResponseTimeSamples {
           AggregateResponseTimeSample(a, r)
-				}
-				if !a.Config.NonOkClientResponses {
-					break
-				}
-				if r.IsSuccess {
-					break
-				}
+        }
+        if !a.Config.NonOkClientResponses {
+          break
+        }
+        if r.IsSuccess {
+          break
+        }
         if a.Config.Aggregate {
           a.AggregateResponse(r)
         } else {
@@ -601,12 +610,13 @@ func (a *Aggregator) Run (context context.Context, wg *sync.WaitGroup) {
   }
 }
 
-func (a *Aggregator) Stats() (uint, uint, uint){
-  queryCounter := a.QueryCounter
-  responseCounter := a.ResponseCounter
-  responseTimeSampleCounter := a.ResponseTimeSampleCounter
-  a.QueryCounter = 0
-  a.ResponseCounter = 0
-  a.ResponseTimeSampleCounter = 0
-  return queryCounter, responseCounter, responseTimeSampleCounter
+func (a *Aggregator) GetStats() (Stats, DnsIdType) {
+  stats := a.Counters
+  a.Counters.Queries = 0
+  a.Counters.Responses = 0
+  a.Counters.ResponseTimes = 0
+  a.Counters.Samples = 0
+  a.Counters.QueryResponseTimeSampleMapSizeExceeds = 0
+
+  return stats, a.QueryResponseTimeSampleMask
 }

@@ -65,14 +65,17 @@ type Config struct {
 	ClientResponseTimeSamples bool
 }
 
+type Stats struct {
+	Queries uint
+	Responses uint
+	ResponseTimes uint
+}
 type ClickHouse struct {
   Config Config
   Conn clickhouse.Conn
   ConnOptions clickhouse.Options
   ReadChannel chan *aggregator.MessageList
-  QueryCounter uint
-  ResponseCounter uint
-  ResponseTimeCounter uint
+	Counters Stats
 }
 
 type ChQuery struct {
@@ -193,7 +196,7 @@ func (ch *ClickHouse) writeQueryStmt(context context.Context,
     appendColumnValue(&columns, &ch.Config.QuestionNameColumn, q.QuestionName)
     appendColumnValue(&columns, &ch.Config.QuestionTypeColumn, q.QuestionType)
     appendColumnValue(&columns, &ch.Config.CounterColumn, q.Counter)
-    log.Debug.Printf("Batch sent size.\n", columns...)
+		log.Trace.Printf("Batch sent: ", columns...)
     err = batch.Append(columns...)
     if err != nil {
       log.Error.Printf("%s.\n", err)
@@ -206,7 +209,7 @@ func (ch *ClickHouse) writeQueryStmt(context context.Context,
     if err != nil {
       return 0, err
     }
-    ch.QueryCounter++
+    ch.Counters.Queries++
     log.Debug.Printf("Batch sent size %d.\n", count)
   }
   return count, nil
@@ -236,7 +239,7 @@ func (ch *ClickHouse) writeResponseStmt(context context.Context,
     appendColumnValue(&columns, &ch.Config.QuestionNameColumn, r.QuestionName)
     appendColumnValue(&columns, &ch.Config.QuestionTypeColumn, r.QuestionType)
     appendColumnValue(&columns, &ch.Config.CounterColumn, r.Counter)
-    log.Debug.Printf("Batch sent size.\n", columns...)
+		log.Trace.Printf("Batch sent: ", columns...)
     err = batch.Append(columns...)
     if err != nil {
       log.Error.Printf("%s.\n", err)
@@ -250,7 +253,7 @@ func (ch *ClickHouse) writeResponseStmt(context context.Context,
       log.Error.Printf("%s.\n", err)
       return 0, err
     }
-    ch.ResponseCounter++
+    ch.Counters.Responses++
     log.Debug.Printf("Batch sent size %d.\n", count)
   }
   return count, nil
@@ -275,7 +278,7 @@ func (ch *ClickHouse) writeResponseTimeStmt(context context.Context,
     appendColumnValue(&columns, &ch.Config.ResponseTimeColumn, r.ResponseTime)
     appendColumnValue(&columns, &ch.Config.IdentityColumn, r.Identity)
     appendColumnValue(&columns, &ch.Config.QueryResponseTimeDeltaColumn, r.ResponseTimeMicroSec)
-    log.Debug.Printf("Batch sent size.\n", columns...)
+		log.Trace.Printf("Batch sent: ", columns...)
     err = batch.Append(columns...)
     if err != nil {
       log.Error.Printf("%s.\n", err)
@@ -289,7 +292,7 @@ func (ch *ClickHouse) writeResponseTimeStmt(context context.Context,
       log.Error.Printf("%s.\n", err)
       return 0, err
     }
-    ch.ResponseTimeCounter++
+    ch.Counters.ResponseTimes++
     log.Debug.Printf("Batch sent size %d.\n", count)
   }
   return count, nil
@@ -411,10 +414,11 @@ func (ch *ClickHouse) Run(context context.Context, wg *sync.WaitGroup) {
   }
 }
       
-func (ch *ClickHouse) Stats() (uint, uint){
-  queryCounter := ch.QueryCounter
-  responseCounter := ch.ResponseCounter
-  ch.QueryCounter = 0
-  ch.ResponseCounter = 0
-  return queryCounter, responseCounter
+func (ch *ClickHouse) GetStats() Stats {
+	stats := ch.Counters
+	ch.Counters.Queries = 0
+	ch.Counters.Responses = 0
+	ch.Counters.ResponseTimes = 0
+
+  return stats
 }

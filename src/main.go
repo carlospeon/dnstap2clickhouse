@@ -162,15 +162,20 @@ func run(ctx context.Context, cancel context.CancelFunc) error {
         statsInterval += statsInterval / 2
       }
       timer.Reset(statsInterval)
-      dtQueryCounter, dtResponseCounter := dt.Stats()
-      aggrQueryCounter, aggrResponseCounter, aggrResponseTimeCounter := aggr.Stats()
-      chQueryCounter, chResponseCounter := ch.Stats()
+      dtCounters := dt.GetStats()
+      aggrCounters, aggrQueryResponseMask := aggr.GetStats()
+      chCounters := ch.GetStats()
       log.Info.Printf("Dnstap query/response: %d/%d, " +
                       "Aggregator query/response/responseTime: %d/%d/%d, " +
-                      "ClickHouse query/response: %d/%d",
-                      dtQueryCounter, dtResponseCounter,
-                      aggrQueryCounter, aggrResponseCounter, aggrResponseTimeCounter,
-                      chQueryCounter, chResponseCounter)
+                      "ClickHouse query/response/responseTime: %d/%d/%d",
+                      dtCounters.Queries, dtCounters.Responses,
+                      aggrCounters.Queries, aggrCounters.Responses, aggrCounters.ResponseTimes,
+                      chCounters.Queries, chCounters.Responses, chCounters.ResponseTimes)
+			if cfg.Aggregator.ClientResponseTimeSamples {
+        log.Info.Printf("Aggregator ClientQueryResponse map exceeds/samples/mask: %d/%d/%b",
+			                  aggrCounters.QueryResponseTimeSampleMapSizeExceeds,
+			                  aggrCounters.Samples, aggrQueryResponseMask)
+			}
 
     case <-ctx.Done():
       dt.Close()
