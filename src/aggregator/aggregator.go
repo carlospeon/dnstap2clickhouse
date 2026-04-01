@@ -29,10 +29,14 @@ import (
 )
 
 const GROUPBY_TAG = "__ANY__"
+/*
+ * In intervals of WriteInterval / 2 sample query/responses and match them to
+ * get the response time delta
+ */
 const MAX_QUERY_RESPONSE_MAP_SIZE = 8
 const MAX_QUERY_RESPONSE_MAP_SIZE_EXCEEDS = MAX_QUERY_RESPONSE_MAP_SIZE / 10 + 1
-const MIN_QUERY_RESPONSE_SAMPLES = 64
-const MAX_QUERY_RESPONSE_SAMPLES = 512
+const MIN_QUERY_RESPONSE_SAMPLES = 32
+const MAX_QUERY_RESPONSE_SAMPLES = 256
 
 type Config struct {
   WriteInterval time.Duration
@@ -54,7 +58,6 @@ type Query struct {
   QuestionName string
   QuestionType string
   Id DnsIdType
-  //ResponseTimeSample bool
   Counter uint64
 }
 
@@ -77,7 +80,6 @@ type Response struct {
   QuestionType string
   Id DnsIdType
 	IsSuccess bool
-  //ResponseTimeSample bool
   Counter uint64
 }
 
@@ -463,10 +465,12 @@ func (a *Aggregator) tuneMask(samples uint64) {
 }
 
 func (a *Aggregator) BuildResponseTimeSampleAggregationList() {
-  a.ResponseTimeSampleList = list.New()
 
   var total uint = 0
 	var samples uint64 = 0
+	if a.ResponseTimeSampleList == nil {
+    a.ResponseTimeSampleList = list.New()
+	}
   a.ResponseTimeSampleMutex.Lock()
   for _, rts := range a.ResponseTimeSampleMap {
 		responseTimeMicroSecAvg := rts.ResponseTimeMicroSec / rts.Counter
@@ -496,7 +500,7 @@ func (a *Aggregator) BuildResponseTimeSampleAggregationList() {
   if total == 0 {
     a.ResponseTimeSampleList = nil
   }
-  log.Trace.Printf("QueryResponseTimeSample List size %d.\n", total)
+  log.Debug.Printf("QueryResponseTimeSample List size %d.\n", total)
   a.ResponseTimeSampleCounter += total
 
 	a.tuneMask(samples)
@@ -508,6 +512,8 @@ func (a *Aggregator) Run (context context.Context, wg *sync.WaitGroup) {
   log.Debug.Printf("Running aggregator with interval %s\n", a.Config.WriteInterval)
 
   timer := time.NewTimer(a.Config.WriteInterval)
+	samplesInterval := a.Config.WriteInterval / 2
+  samplesTimer := time.NewTimer(samplesInterval)
   for {
     select {
     case <-context.Done():
@@ -560,13 +566,18 @@ func (a *Aggregator) Run (context context.Context, wg *sync.WaitGroup) {
         }
       }
 
+    case <-samplesTimer.C:
+      log.Debug.Printf("Aggregator: fired samples interval %s", samplesInterval)
+      samplesTimer.Reset(samplesInterval)
+      if a.Config.ClientResponseTimeSamples {
+        a.BuildResponseTimeSampleAggregationList()
+      }
     case <-timer.C:
       log.Debug.Printf("Aggregator: fired interval %s", a.Config.WriteInterval)
       timer.Reset(a.Config.WriteInterval)
       if a.Config.Aggregate {
         a.BuildQueryAggregationList()
         a.BuildResponseAggregationList()
-        a.BuildResponseTimeSampleAggregationList()
       }
       if a.QueryList != nil {
         log.Debug.Printf("Writing query list to WriteChannel")

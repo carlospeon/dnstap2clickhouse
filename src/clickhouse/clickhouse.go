@@ -172,7 +172,6 @@ func (ch *ClickHouse) initResponseTimeStmt() ChQuery {
 }
 
 func (ch *ClickHouse) writeQueryStmt(context context.Context,
-                                     //stmt string, numberCols uint,
 																		 chQ ChQuery,
                                      m *aggregator.MessageList) (uint, error) {
   var count uint = 0
@@ -214,7 +213,6 @@ func (ch *ClickHouse) writeQueryStmt(context context.Context,
 }
 
 func (ch *ClickHouse) writeResponseStmt(context context.Context,
-                                        //stmt string, numberCols uint,
 																				chQ ChQuery,
                                         m *aggregator.MessageList) (uint, error) {
   var count uint = 0
@@ -258,7 +256,6 @@ func (ch *ClickHouse) writeResponseStmt(context context.Context,
   return count, nil
 }
 func (ch *ClickHouse) writeResponseTimeStmt(context context.Context,
-                                        //stmt string, numberCols uint,
 																				chQ ChQuery,
                                         m *aggregator.MessageList) (uint, error) {
   var count uint = 0
@@ -298,13 +295,6 @@ func (ch *ClickHouse) writeResponseTimeStmt(context context.Context,
   return count, nil
 }
 func (ch *ClickHouse) writeMessageList(context context.Context,
-                                       /*queryStmt string,
-                                       numberQueryCols uint,
-                                       responseStmt string,
-                                       numberResponseCols uint,
-																			 responseTimeStmt string,
-																			 numberResponseTimeCols uint,
-																			 */
 																			 query ChQuery,
 																			 response ChQuery,
 																			 responseTime ChQuery,
@@ -337,22 +327,8 @@ func (ch *ClickHouse) Run(context context.Context, wg *sync.WaitGroup) {
   defer ch.Close()
   var err error  
 
-	/*
-  writeQueries := true
-  writeResponses := true
-
-  if len(ch.Config.QueryTable) == 0 {
-    writeQueries = false
-  }
-  if len(ch.Config.ResponseTable) == 0 {
-    writeResponses = false
-  }
-	*/
-	writeQueries := ch.Config.ClientQueries
-	writeResponses := ch.Config.NonOkClientResponses
-	writeResponseTimes := ch.Config.ClientResponseTimeSamples
-
-  if !writeQueries && !writeResponses && !writeResponseTimes {
+  if !ch.Config.ClientQueries && !ch.Config.NonOkClientResponses &&
+	   !ch.Config.ClientResponseTimeSamples {
     log.Warn.Printf("Nothing to write, check QueryTable and ResponseTable configuration")
     return
   }
