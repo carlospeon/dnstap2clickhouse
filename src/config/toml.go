@@ -49,7 +49,7 @@ var Defaults = Config {
     GroupbyQueryAddress: true,
     GroupbyQuestion: true,
   },
-  ClickHouse: clickhouse.Config{
+  ClickHouse: clickhouse.Config {
     Hosts: "localhost:9000",
     Secure: false,
     InsecureSkipVerify: false,
@@ -58,9 +58,11 @@ var Defaults = Config {
     Database: "default",
     QueryTable: "clientQuery",
     ResponseTable: "clientResponse",
+    QueryResponseTimeTable: "queryResponseTime",
     QueryTimeColumn: "queryTime",
     ResponseTimeColumn: "responseTime",
     ResponseStatusColumn: "responseStatus",
+    QueryResponseTimeDeltaColumn: "queryResponseTimeDelta",
     IdentityColumn: "identity",
     QueryAddressColumn: "queryAddress",
     QuestionNameColumn: "questionName",
@@ -73,6 +75,7 @@ var Defaults = Config {
     Readers: 1,
     ClientQueries: true,
     NonOkClientResponses: true,
+    ClientResponseTimeSamples: false,
   },
 }
 
@@ -174,8 +177,8 @@ func Load(args map[string]any, filePath string) (Config, error) {
   }
   log.Trace.Printf("toml config loaded: %s", config)
 
-  printStructFields(log.Info, &config, "Config") 
 
+	/*
   if !config.Aggregator.Aggregate {
     config.ClickHouse.CounterColumn = ""
   }
@@ -185,6 +188,20 @@ func Load(args map[string]any, filePath string) (Config, error) {
   if !config.Dnstap.NonOkClientResponses {
     config.ClickHouse.ResponseTable = ""
   }
+  if !config.Aggregator.ClientResponseTimeSample {
+    config.ClickHouse.ResponseTimeTable = ""
+  }
+	*/
+
+	config.Aggregator.ClientQueries = config.Dnstap.ClientQueries
+	config.Aggregator.NonOkClientResponses = config.Dnstap.NonOkClientResponses
+	config.Aggregator.ClientResponseTimeSamples = config.Dnstap.ClientResponseTimeSamples 
+	config.ClickHouse.Aggregate = config.Aggregator.Aggregate
+	config.ClickHouse.ClientQueries = config.Dnstap.ClientQueries
+	config.ClickHouse.NonOkClientResponses = config.Dnstap.NonOkClientResponses
+	config.ClickHouse.ClientResponseTimeSamples = config.Dnstap.ClientResponseTimeSamples
+
+  printStructFields(log.Info, &config, "Config") 
 
   return config, nil
 

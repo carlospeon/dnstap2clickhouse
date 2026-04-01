@@ -44,6 +44,7 @@ type Config struct {
   Readers int
   ClientQueries bool
   NonOkClientResponses bool
+  ClientResponseTimeSamples bool
 }
 
 type Dnstap struct {
@@ -60,7 +61,8 @@ type Dnstap struct {
 
 func Init(d *Dnstap) (*Dnstap, error) {
   if !d.Config.ClientQueries &&
-     !d.Config.NonOkClientResponses {
+     !d.Config.NonOkClientResponses &&
+		 !d.Config.ClientResponseTimeSamples {
     return nil, errors.New("Nothing to do, check configuration options " +
                             "ClientQueries and/or NonOkClientResponses")
   }
@@ -207,6 +209,8 @@ func (d *Dnstap) Read(context context.Context, wg *sync.WaitGroup) {
 func (d *Dnstap) Decode(context context.Context,
                         dec *go_dnstap.Decoder) {
   var dt go_dnstap.Dnstap
+  //var clientQueryRateTime time.Time = time.Unix(0,0)
+  //var clientResponseRateTime time.Time = time.Unix(0,0)
   for {
     select {
     case <-context.Done():
@@ -243,7 +247,7 @@ func (d *Dnstap) Decode(context context.Context,
 
     switch *(msg.Type) {
     case go_dnstap.Message_CLIENT_QUERY:
-      if !d.Config.ClientQueries {
+      if !d.Config.ClientQueries && !d.Config.ClientResponseTimeSamples {
         continue
       }
       if msg.QueryMessage == nil {
@@ -259,6 +263,12 @@ func (d *Dnstap) Decode(context context.Context,
       } else {
         queryTime = time.Now()
       }
+
+      var queryPort uint32 = 0
+      if msg.QueryPort != nil {
+        queryPort = *msg.QueryPort
+      }
+
       dnsMsg := new(dns.Msg)
       err = dnsMsg.Unpack(msg.QueryMessage)
       if err != nil {
@@ -267,13 +277,22 @@ func (d *Dnstap) Decode(context context.Context,
       }
       log.Debug.Printf("Dnstap query message: %s", dnsMsg)
 
+      /* responseTimeSample := false
+      if queryTime.After(clientQueryRateTime) {
+        responseTimeSample = true
+        clientQueryRateTime = queryTime.Add(d.Config.ClientResponseTimeIntervalSample)
+      } */
+
       for _, question := range dnsMsg.Question {
         q := aggregator.Query{
           Identity: string(dt.Identity),
           QueryAddress: net.IP(msg.QueryAddress).String(),
+          QueryPort: queryPort,
           QueryTime: queryTime,
           QuestionName: question.Name,
           QuestionType: dns.Type(question.Qtype).String(),
+					Id: dnsMsg.MsgHdr.Id,
+          // ResponseTimeSample: responseTimeSample,
           Counter: 1,
         }
 
@@ -284,7 +303,7 @@ func (d *Dnstap) Decode(context context.Context,
         log.Debug.Printf("Dnstap write query: %s", q)
       }
     case go_dnstap.Message_CLIENT_RESPONSE:
-      if !d.Config.NonOkClientResponses {
+      if !d.Config.NonOkClientResponses && !d.Config.ClientResponseTimeSamples {
         continue
       }
       if msg.ResponseMessage == nil {
@@ -300,6 +319,12 @@ func (d *Dnstap) Decode(context context.Context,
       } else {
         responseTime = time.Now()
       }
+
+      var queryPort uint32 = 0
+      if msg.QueryPort != nil {
+        queryPort = *msg.QueryPort
+      }
+
       dnsMsg := new(dns.Msg)
       err = dnsMsg.Unpack(msg.ResponseMessage)
       if err != nil {
@@ -307,7 +332,15 @@ func (d *Dnstap) Decode(context context.Context,
         continue
       }
       log.Debug.Printf("Dnstap response message: %s", dnsMsg)
-      if dnsMsg.Rcode == dns.RcodeSuccess {
+
+      /*responseTimeSample := false
+      if responseTime.After(clientResponseRateTime) {
+        responseTimeSample = true
+        clientResponseRateTime = responseTime.Add(d.Config.ClientResponseTimeIntervalSample)
+      }*/
+
+			isSuccess := (dnsMsg.Rcode == dns.RcodeSuccess)
+      if isSuccess && !d.Config.ClientResponseTimeSamples {
         // Skip no error messages
         continue
       }
@@ -317,10 +350,14 @@ func (d *Dnstap) Decode(context context.Context,
         r := aggregator.Response{
           Identity: string(dt.Identity),
           QueryAddress: net.IP(msg.QueryAddress).String(),
+          QueryPort: queryPort,
           ResponseTime: responseTime,
           ResponseStatus: responseStatus,
           QuestionName: question.Name,
           QuestionType: dns.Type(question.Qtype).String(),
+					Id: dnsMsg.MsgHdr.Id,
+					IsSuccess: isSuccess,
+          //ResponseTimeSample: responseTimeSample,
           Counter: 1,
         }
 

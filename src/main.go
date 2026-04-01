@@ -163,13 +163,13 @@ func run(ctx context.Context, cancel context.CancelFunc) error {
       }
       timer.Reset(statsInterval)
       dtQueryCounter, dtResponseCounter := dt.Stats()
-      aggrQueryCounter, aggrResponseCounter := aggr.Stats()
+      aggrQueryCounter, aggrResponseCounter, aggrResponseTimeCounter := aggr.Stats()
       chQueryCounter, chResponseCounter := ch.Stats()
       log.Info.Printf("Dnstap query/response: %d/%d, " +
-                      "Aggregator query/response: %d/%d, " +
+                      "Aggregator query/response/responseTime: %d/%d/%d, " +
                       "ClickHouse query/response: %d/%d",
                       dtQueryCounter, dtResponseCounter,
-                      aggrQueryCounter, aggrResponseCounter,
+                      aggrQueryCounter, aggrResponseCounter, aggrResponseTimeCounter,
                       chQueryCounter, chResponseCounter)
 
     case <-ctx.Done():

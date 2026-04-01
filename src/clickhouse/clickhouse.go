@@ -57,6 +57,12 @@ type Config struct {
   QuestionNameColumn string
   QuestionTypeColumn string
   CounterColumn string
+  QueryResponseTimeTable string
+	QueryResponseTimeDeltaColumn string
+	Aggregate bool
+  ClientQueries bool
+	NonOkClientResponses bool
+	ClientResponseTimeSamples bool
 }
 
 type ClickHouse struct {
@@ -66,6 +72,12 @@ type ClickHouse struct {
   ReadChannel chan *aggregator.MessageList
   QueryCounter uint
   ResponseCounter uint
+  ResponseTimeCounter uint
+}
+
+type ChQuery struct {
+	Stmt string
+	NCols uint
 }
 
 func Init(ch *ClickHouse) (*ClickHouse) {
@@ -121,7 +133,7 @@ func appendColumnValue(cols *[]any, name *string, c any) {
   }
 }
 
-func (ch *ClickHouse) initQueryStmt() (string, uint) {
+func (ch *ClickHouse) initQueryStmt() ChQuery {
   stmt := fmt.Sprintf("INSERT INTO %s (", ch.Config.QueryTable)
   numberCols := uint(0)
   appendColumnName(&stmt, &ch.Config.QueryTimeColumn, &numberCols)
@@ -132,9 +144,9 @@ func (ch *ClickHouse) initQueryStmt() (string, uint) {
   appendColumnName(&stmt, &ch.Config.CounterColumn, &numberCols)
   stmt += ")"
   log.Debug.Printf("Insert statement %s", stmt)
-  return stmt, numberCols
+	return ChQuery { Stmt: stmt, NCols: numberCols }
 }
-func (ch *ClickHouse) initResponseStmt() (string, uint) {
+func (ch *ClickHouse) initResponseStmt() ChQuery {
   stmt := fmt.Sprintf("INSERT INTO %s (", ch.Config.ResponseTable)
   numberCols := uint(0)
   appendColumnName(&stmt, &ch.Config.ResponseTimeColumn, &numberCols)
@@ -146,25 +158,36 @@ func (ch *ClickHouse) initResponseStmt() (string, uint) {
   appendColumnName(&stmt, &ch.Config.CounterColumn, &numberCols)
   stmt += ")"
   log.Debug.Printf("Insert statement %s", stmt)
-  return stmt, numberCols
+	return ChQuery { Stmt: stmt, NCols: numberCols }
+}
+func (ch *ClickHouse) initResponseTimeStmt() ChQuery {
+  stmt := fmt.Sprintf("INSERT INTO %s (", ch.Config.QueryResponseTimeTable)
+  numberCols := uint(0)
+  appendColumnName(&stmt, &ch.Config.ResponseTimeColumn, &numberCols)
+  appendColumnName(&stmt, &ch.Config.IdentityColumn, &numberCols)
+  appendColumnName(&stmt, &ch.Config.QueryResponseTimeDeltaColumn, &numberCols)
+  stmt += ")"
+  log.Debug.Printf("Insert statement %s", stmt)
+	return ChQuery { Stmt: stmt, NCols: numberCols }
 }
 
 func (ch *ClickHouse) writeQueryStmt(context context.Context,
-                                     stmt string, numberCols uint,
+                                     //stmt string, numberCols uint,
+																		 chQ ChQuery,
                                      m *aggregator.MessageList) (uint, error) {
   var count uint = 0
   l := m.List
   if l == nil {
     return 0, nil
   }
-  batch, err := ch.Conn.PrepareBatch(context, stmt,
+  batch, err := ch.Conn.PrepareBatch(context, chQ.Stmt,
     driver.WithReleaseConnection())
   if err != nil {
     return 0, err
   }
   for e := l.Front(); e != nil; e = e.Next() {
     q := e.Value.(*aggregator.Query)
-    var columns = make([]any, 0, numberCols)
+    var columns = make([]any, 0, chQ.NCols)
     appendColumnValue(&columns, &ch.Config.QueryTimeColumn, q.QueryTime)
     appendColumnValue(&columns, &ch.Config.IdentityColumn, q.Identity)
     appendColumnValue(&columns, &ch.Config.QueryAddressColumn, q.QueryAddress)
@@ -191,14 +214,15 @@ func (ch *ClickHouse) writeQueryStmt(context context.Context,
 }
 
 func (ch *ClickHouse) writeResponseStmt(context context.Context,
-                                        stmt string, numberCols uint,
+                                        //stmt string, numberCols uint,
+																				chQ ChQuery,
                                         m *aggregator.MessageList) (uint, error) {
   var count uint = 0
   l := m.List
   if l == nil {
     return 0, nil
   }
-  batch, err := ch.Conn.PrepareBatch(context, stmt,
+  batch, err := ch.Conn.PrepareBatch(context, chQ.Stmt,
     driver.WithReleaseConnection())
   if err != nil {
     log.Error.Printf("%s.\n", err)
@@ -206,7 +230,7 @@ func (ch *ClickHouse) writeResponseStmt(context context.Context,
   }
   for e := l.Front(); e != nil; e = e.Next() {
     r := e.Value.(*aggregator.Response)
-    var columns = make([]any, 0, numberCols)
+    var columns = make([]any, 0, chQ.NCols)
     appendColumnValue(&columns, &ch.Config.ResponseTimeColumn, r.ResponseTime)
     appendColumnValue(&columns, &ch.Config.IdentityColumn, r.Identity)
     appendColumnValue(&columns, &ch.Config.ResponseStatusColumn, r.ResponseStatus)
@@ -233,22 +257,74 @@ func (ch *ClickHouse) writeResponseStmt(context context.Context,
   }
   return count, nil
 }
+func (ch *ClickHouse) writeResponseTimeStmt(context context.Context,
+                                        //stmt string, numberCols uint,
+																				chQ ChQuery,
+                                        m *aggregator.MessageList) (uint, error) {
+  var count uint = 0
+  l := m.List
+  if l == nil {
+    return 0, nil
+  }
+  batch, err := ch.Conn.PrepareBatch(context, chQ.Stmt,
+    driver.WithReleaseConnection())
+  if err != nil {
+    log.Error.Printf("%s.\n", err)
+    return 0, err
+  }
+  for e := l.Front(); e != nil; e = e.Next() {
+    r := e.Value.(*aggregator.ResponseTimeSample)
+    var columns = make([]any, 0, chQ.NCols)
+    appendColumnValue(&columns, &ch.Config.ResponseTimeColumn, r.ResponseTime)
+    appendColumnValue(&columns, &ch.Config.IdentityColumn, r.Identity)
+    appendColumnValue(&columns, &ch.Config.QueryResponseTimeDeltaColumn, r.ResponseTimeMicroSec)
+    log.Debug.Printf("Batch sent size.\n", columns...)
+    err = batch.Append(columns...)
+    if err != nil {
+      log.Error.Printf("%s.\n", err)
+      return 0, err
+    }
+    count++
+  }
+  if count > 0 {
+    err = batch.Send()
+    if err != nil {
+      log.Error.Printf("%s.\n", err)
+      return 0, err
+    }
+    ch.ResponseTimeCounter++
+    log.Debug.Printf("Batch sent size %d.\n", count)
+  }
+  return count, nil
+}
 func (ch *ClickHouse) writeMessageList(context context.Context,
-                                       queryStmt string,
+                                       /*queryStmt string,
                                        numberQueryCols uint,
                                        responseStmt string,
                                        numberResponseCols uint,
+																			 responseTimeStmt string,
+																			 numberResponseTimeCols uint,
+																			 */
+																			 query ChQuery,
+																			 response ChQuery,
+																			 responseTime ChQuery,
                                        m *aggregator.MessageList) error {
   switch m.Type {
   case aggregator.QueryType:
     log.Debug.Printf("Readed query list")
-    _, err := ch.writeQueryStmt(context, queryStmt, numberQueryCols, m)
+    _, err := ch.writeQueryStmt(context, query, m)
     if err != nil {
       return err
     }
   case aggregator.ResponseType:
     log.Debug.Printf("Readed response list")
-    _, err := ch.writeResponseStmt(context, responseStmt, numberResponseCols, m)
+    _, err := ch.writeResponseStmt(context, response, m)
+    if err != nil {
+      return err
+    }
+  case aggregator.ResponseTimeSampleType:
+    log.Debug.Printf("Readed response list")
+    _, err := ch.writeResponseTimeStmt(context, responseTime, m)
     if err != nil {
       return err
     }
@@ -261,6 +337,7 @@ func (ch *ClickHouse) Run(context context.Context, wg *sync.WaitGroup) {
   defer ch.Close()
   var err error  
 
+	/*
   writeQueries := true
   writeResponses := true
 
@@ -270,8 +347,12 @@ func (ch *ClickHouse) Run(context context.Context, wg *sync.WaitGroup) {
   if len(ch.Config.ResponseTable) == 0 {
     writeResponses = false
   }
+	*/
+	writeQueries := ch.Config.ClientQueries
+	writeResponses := ch.Config.NonOkClientResponses
+	writeResponseTimes := ch.Config.ClientResponseTimeSamples
 
-  if !writeQueries && !writeResponses {
+  if !writeQueries && !writeResponses && !writeResponseTimes {
     log.Warn.Printf("Nothing to write, check QueryTable and ResponseTable configuration")
     return
   }
@@ -281,14 +362,20 @@ func (ch *ClickHouse) Run(context context.Context, wg *sync.WaitGroup) {
     log.Error.Printf("%s.\n", err)
     return;
   }
-  queryStmt, numberQueryCols := ch.initQueryStmt()
-  if numberQueryCols == 0 {
+  chQuery := ch.initQueryStmt()
+  if chQuery.NCols == 0 {
     log.Warn.Printf("No columns to insert queries")
   }
 
-  responseStmt, numberResponseCols := ch.initResponseStmt()
-  if numberResponseCols == 0 {
-    log.Warn.Printf("No columns to insert queries")
+  chResponse := ch.initResponseStmt()
+  if chResponse.NCols == 0 {
+    log.Warn.Printf("No columns to insert responses")
+    return
+  }
+
+  chResponseTime := ch.initResponseTimeStmt()
+  if chResponseTime.NCols == 0 {
+    log.Warn.Printf("No columns to insert response times")
     return
   }
 
@@ -319,8 +406,7 @@ func (ch *ClickHouse) Run(context context.Context, wg *sync.WaitGroup) {
       }
       // retryLen = 0, process normaly
 
-      err := ch.writeMessageList(context, queryStmt, numberQueryCols,
-                                 responseStmt, numberResponseCols, m)
+      err := ch.writeMessageList(context, chQuery, chResponse, chResponseTime, m)
       if err != nil {
         log.Error.Printf("%s retrying...", err)
         retryInterval = RETRY_INTERVAL_STEP
@@ -332,8 +418,7 @@ func (ch *ClickHouse) Run(context context.Context, wg *sync.WaitGroup) {
     case <-retryTimer.C:
       for e := retryList.Front(); e != nil; e = retryList.Front()  {
         m := e.Value.(*aggregator.MessageList)
-        err := ch.writeMessageList(context, queryStmt, numberQueryCols,
-                                   responseStmt, numberResponseCols, m)
+        err := ch.writeMessageList(context, chQuery, chResponse, chResponseTime, m)
         if err != nil {
           log.Error.Printf("%s retrying...", err)
           if retryInterval < RETRY_MAX_INTERVAL {

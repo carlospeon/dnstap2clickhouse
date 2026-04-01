@@ -29,6 +29,10 @@ import (
 )
 
 const GROUPBY_TAG = "__ANY__"
+const MAX_QUERY_RESPONSE_MAP_SIZE = 8
+const MAX_QUERY_RESPONSE_MAP_SIZE_EXCEEDS = MAX_QUERY_RESPONSE_MAP_SIZE / 10 + 1
+const MIN_QUERY_RESPONSE_SAMPLES = 64
+const MAX_QUERY_RESPONSE_SAMPLES = 512
 
 type Config struct {
   WriteInterval time.Duration
@@ -36,17 +40,30 @@ type Config struct {
   WriteUngrouped bool
   GroupbyQueryAddress bool
   GroupbyQuestion bool
+  ClientQueries bool
+  NonOkClientResponses bool
+	ClientResponseTimeSamples bool
 }
 
+type DnsIdType = uint16
 type Query struct {
   QueryTime time.Time
   Identity string
   QueryAddress string
+  QueryPort uint32
   QuestionName string
   QuestionType string
+  Id DnsIdType
+  //ResponseTimeSample bool
   Counter uint64
 }
 
+func (q *Query) isResponse() bool  { return false }
+func (q *Query) getIdentity() string  { return q.Identity }
+func (q *Query) getQueryAddress() string  { return q.QueryAddress }
+func (q *Query) getQueryPort() uint32  { return q.QueryPort }
+func (q *Query) getId() DnsIdType  { return q.Id }
+func (q *Query) getTime() time.Time  { return q.QueryTime }
 func (q *Query) getCounter() uint64  { return q.Counter }
 func (q *Query) setCounter(c uint64) { q.Counter = c }
 
@@ -55,13 +72,32 @@ type Response struct {
   Identity string
   ResponseStatus string
   QueryAddress string
+  QueryPort uint32
   QuestionName string
   QuestionType string
+  Id DnsIdType
+	IsSuccess bool
+  //ResponseTimeSample bool
   Counter uint64
 }
 
+func (r *Response) isResponse() bool  { return true }
+func (r *Response) getIdentity() string  { return r.Identity }
+func (r *Response) getQueryAddress() string  { return r.QueryAddress }
+func (r *Response) getQueryPort() uint32  { return r.QueryPort }
+func (r *Response) getId() DnsIdType  { return r.Id }
+func (r *Response) getTime() time.Time  { return r.ResponseTime }
 func (r *Response) getCounter() uint64  { return r.Counter }
 func (r *Response) setCounter(c uint64) { r.Counter = c }
+
+type HasClientResponseTime interface {
+	isResponse() bool
+	getIdentity() string
+	getQueryAddress() string
+	getQueryPort() uint32
+	getId() DnsIdType
+	getTime() time.Time
+}
 
 type HasCounter interface {
   getCounter() uint64
@@ -72,6 +108,7 @@ type MessageType int
 const (
   QueryType      MessageType = iota + 1 // EnumIndex = 1
   ResponseType                          // EnumIndex = 2
+  ResponseTimeSampleType                // EnumIndex = 3
 )
 
 type Message struct {
@@ -90,12 +127,19 @@ type Aggregator struct {
   WriteChannel chan *MessageList
   QueryAggregationMap QueryAggregationMap
   ResponseAggregationMap ResponseAggregationMap
+  QueryResponseTimeSampleMap QueryResponseTimeSampleMap
+  ResponseTimeSampleMap ResponseTimeSampleMap
   QueryList *list.List
   ResponseList *list.List
+  ResponseTimeSampleList *list.List
   QueryMutex *sync.Mutex
   ResponseMutex *sync.Mutex
+  ResponseTimeSampleMutex *sync.Mutex
   QueryCounter uint
   ResponseCounter uint
+  ResponseTimeSampleCounter uint
+	QueryResponseTimeSampleMask DnsIdType
+	QueryResponseTimeSampleMapSizeExceeds uint32
 }
 
 type Identity = string
@@ -121,6 +165,18 @@ type ResponseMapKey struct {
   QuestionName string
   QuestionType string
 }
+type QueryResponseTimeSampleMapKey struct {
+  Identity string
+  QueryAddress string
+  QueryPort uint32
+  Id DnsIdType
+}
+type ResponseTimeSample struct {
+	ResponseTime time.Time
+  Identity string
+  ResponseTimeMicroSec uint64
+  Counter uint64
+}
 
 type QueryAggregationMap map[QueryMapKey]*Query
 type ResponseAggregationMap map[ResponseMapKey]*Response
@@ -129,12 +185,20 @@ type MapKey interface {
   QueryMapKey | ResponseMapKey
 }
 
+type QueryResponseTimeSampleMap map[QueryResponseTimeSampleMapKey]time.Time
+type ResponseTimeSampleMap map[string]*ResponseTimeSample
+
 func Init(a *Aggregator) (*Aggregator) {
   a.ReadChannel = make(chan *Message, 256)
   a.QueryAggregationMap = make(QueryAggregationMap)
   a.ResponseAggregationMap = make(ResponseAggregationMap)
+  a.QueryResponseTimeSampleMap = make(QueryResponseTimeSampleMap)
+  a.ResponseTimeSampleMap = make(ResponseTimeSampleMap)
   a.QueryMutex = &sync.Mutex{}
   a.ResponseMutex = &sync.Mutex{}
+  a.ResponseTimeSampleMutex = &sync.Mutex{}
+	a.QueryResponseTimeSampleMask = 0
+	a.QueryResponseTimeSampleMapSizeExceeds = 0
 
   return a
 }
@@ -143,6 +207,8 @@ func (a *Aggregator) Close() {
   close(a.ReadChannel)
   clear(a.QueryAggregationMap)
   clear(a.ResponseAggregationMap)
+  clear(a.QueryResponseTimeSampleMap)
+  clear(a.ResponseTimeSampleMap)
   log.Info.Printf("Aggregator closed.\n")
 }
 
@@ -249,6 +315,82 @@ func (a *Aggregator) AggregateResponse(r *Response) {
   a.ResponseMutex.Unlock()
 }
 
+func isSample[QR HasClientResponseTime](a *Aggregator, qr QR) bool {
+	if a.QueryResponseTimeSampleMask == 0 {
+		return true
+	}
+  return (qr.getId() & a.QueryResponseTimeSampleMask == 0)
+}
+
+func AggregateResponseTimeSample[QR HasClientResponseTime](a *Aggregator, qr QR) {
+	if !isSample(a, qr) {
+		return
+	}
+
+  a.ResponseTimeSampleMutex.Lock()
+  defer a.ResponseTimeSampleMutex.Unlock()
+
+	log.Trace.Printf("QueryResponseTimeSample isResponse: %s", qr.isResponse())
+
+  key := QueryResponseTimeSampleMapKey {
+    Identity: qr.getIdentity(),
+    QueryAddress: qr.getQueryAddress(),
+    QueryPort: qr.getQueryPort(),
+    Id: qr.getId() }
+  firstQrTime, ok := a.QueryResponseTimeSampleMap[ key ]
+  if !ok {
+	  mapLen := len(a.QueryResponseTimeSampleMap)
+	  log.Trace.Printf("QueryResponseSample map len: %d", mapLen)
+	  if mapLen > MAX_QUERY_RESPONSE_MAP_SIZE {
+			a.QueryResponseTimeSampleMapSizeExceeds++
+			if a.QueryResponseTimeSampleMapSizeExceeds == 0 {
+				a.QueryResponseTimeSampleMapSizeExceeds--
+			}
+		  return
+	  }
+    a.QueryResponseTimeSampleMap[ key ] = qr.getTime()
+		log.Trace.Printf("QueryResponseTimeSample not found, inserting time: %s", 
+		  qr.isResponse(), key)
+
+    return
+  }
+	var responseTimeSampleMicroSecI int64
+	var queryTime time.Time
+	var responseTime time.Time
+	if qr.isResponse() {
+		queryTime = firstQrTime
+		responseTime = qr.getTime()
+	} else {
+		queryTime = qr.getTime()
+		responseTime = firstQrTime
+  }
+  responseTimeSampleMicroSecI = responseTime.Sub(queryTime).Microseconds()
+	if responseTimeSampleMicroSecI < 0 {
+		log.Warn.Printf("ResponseTime < 0")
+		return
+	}
+  delete(a.QueryResponseTimeSampleMap, key)
+	responseTimeSampleMicroSec := uint64(responseTimeSampleMicroSecI)
+	if log.IsTrace() {
+		log.Trace.Printf("QueryResponseSample response time: %d, map len: %d", 
+      responseTimeSampleMicroSec, len(a.QueryResponseTimeSampleMap))
+	}
+
+  responseTimeSample, ok := a.ResponseTimeSampleMap[qr.getIdentity()]
+  if !ok {
+    responseTimeSample = &ResponseTimeSample { 
+			ResponseTime: responseTime, 
+      Identity: qr.getIdentity(), 
+      ResponseTimeMicroSec: responseTimeSampleMicroSec,
+      Counter: 1,
+    }
+    a.ResponseTimeSampleMap[qr.getIdentity()] = responseTimeSample
+    return
+  }
+  responseTimeSample.ResponseTimeMicroSec += responseTimeSampleMicroSec
+  responseTimeSample.Counter++
+}
+
 func (a *Aggregator) BuildQueryAggregationList() {
   a.QueryList = list.New()
 
@@ -293,6 +435,73 @@ func (a *Aggregator) BuildResponseAggregationList() {
   a.ResponseCounter += total
 }
 
+func (a *Aggregator) tuneMask(samples uint64) {
+	maskLog := "keep"
+	if a.QueryResponseTimeSampleMapSizeExceeds > MAX_QUERY_RESPONSE_MAP_SIZE_EXCEEDS ||
+	   samples > MAX_QUERY_RESPONSE_SAMPLES {
+		checkOverflow := a.QueryResponseTimeSampleMask + 1
+		if checkOverflow == 0 {
+      maskLog = "overflow"
+		} else {
+			// not overflow
+			a.QueryResponseTimeSampleMask = checkOverflow * 2 - 1
+      maskLog = "larger"
+		}
+	} else if a.QueryResponseTimeSampleMapSizeExceeds == 0 && a.QueryResponseTimeSampleMask != 0 &&
+	          samples < MIN_QUERY_RESPONSE_SAMPLES {
+		if a.QueryResponseTimeSampleMask == 1 {
+			a.QueryResponseTimeSampleMask = 0
+		} else {
+	    checkOverflow := a.QueryResponseTimeSampleMask + 1
+		  a.QueryResponseTimeSampleMask = checkOverflow / 2 - 1
+		}
+    maskLog = "shorter"
+	}
+  log.Debug.Printf("QueryResponseTimeSampleMapSize samples %d, exceeded %d times, %s mask %b", 
+	  samples, a.QueryResponseTimeSampleMapSizeExceeds, maskLog, a.QueryResponseTimeSampleMask)
+	a.QueryResponseTimeSampleMapSizeExceeds = 0
+}
+
+func (a *Aggregator) BuildResponseTimeSampleAggregationList() {
+  a.ResponseTimeSampleList = list.New()
+
+  var total uint = 0
+	var samples uint64 = 0
+  a.ResponseTimeSampleMutex.Lock()
+  for _, rts := range a.ResponseTimeSampleMap {
+		responseTimeMicroSecAvg := rts.ResponseTimeMicroSec / rts.Counter
+		samples += rts.Counter
+		log.Debug.Printf("Aggregator ResponseTimeSample: %s %d/%d: %d\n",
+                      rts.Identity, rts.ResponseTimeMicroSec, rts.Counter,
+										  responseTimeMicroSecAvg)
+		rts.ResponseTimeMicroSec = responseTimeMicroSecAvg
+    rts.Counter = 1
+    a.ResponseTimeSampleList.PushBack(rts)
+    total++
+    log.Trace.Printf("List push Aggregator ResponseTimeSample average: %s\n",
+                      *rts)
+  }
+  clear(a.ResponseTimeSampleMap)
+  
+  now := time.Now()
+  for qrtsk, t := range a.QueryResponseTimeSampleMap {
+    if t.Add(a.Config.WriteInterval).Before(now) {
+      delete(a.QueryResponseTimeSampleMap, qrtsk)
+    }
+  }
+  if log.IsTrace() {
+    log.Trace.Printf("QueryResponseTimeSample map size %d.\n", len(a.QueryResponseTimeSampleMap))
+  }
+  a.ResponseTimeSampleMutex.Unlock()
+  if total == 0 {
+    a.ResponseTimeSampleList = nil
+  }
+  log.Trace.Printf("QueryResponseTimeSample List size %d.\n", total)
+  a.ResponseTimeSampleCounter += total
+
+	a.tuneMask(samples)
+}
+
 func (a *Aggregator) Run (context context.Context, wg *sync.WaitGroup) {
   defer wg.Done()
   defer a.Close()
@@ -312,6 +521,12 @@ func (a *Aggregator) Run (context context.Context, wg *sync.WaitGroup) {
       case QueryType:
         q := m.Message.(*Query)
         log.Debug.Printf("Readed query: %s.\n", q)
+				if a.Config.ClientResponseTimeSamples {
+          AggregateResponseTimeSample(a, q)
+				}
+				if !a.Config.ClientQueries {
+					break
+				}
         if a.Config.Aggregate {
           a.AggregateQuery(q)
         } else {
@@ -324,6 +539,15 @@ func (a *Aggregator) Run (context context.Context, wg *sync.WaitGroup) {
         }
       case ResponseType:
         r := m.Message.(*Response)
+				if a.Config.ClientResponseTimeSamples {
+          AggregateResponseTimeSample(a, r)
+				}
+				if !a.Config.NonOkClientResponses {
+					break
+				}
+				if r.IsSuccess {
+					break
+				}
         if a.Config.Aggregate {
           a.AggregateResponse(r)
         } else {
@@ -342,27 +566,36 @@ func (a *Aggregator) Run (context context.Context, wg *sync.WaitGroup) {
       if a.Config.Aggregate {
         a.BuildQueryAggregationList()
         a.BuildResponseAggregationList()
+        a.BuildResponseTimeSampleAggregationList()
       }
       if a.QueryList != nil {
-        log.Debug.Printf("Writing list to WriteQueryChannel")
+        log.Debug.Printf("Writing query list to WriteChannel")
         a.WriteChannel <- &MessageList { Type: QueryType,
                                          List: a.QueryList }
         a.QueryList = nil
       }
       if a.ResponseList != nil {
-        log.Debug.Printf("Writing list to WriteResponseChannel")
+        log.Debug.Printf("Writing response list to WriteChannel")
         a.WriteChannel <- &MessageList { Type: ResponseType,
                                          List: a.ResponseList }
         a.ResponseList = nil
+      }
+      if a.ResponseTimeSampleList != nil {
+        log.Debug.Printf("Writing response time list to WriteResponseChannel")
+        a.WriteChannel <- &MessageList { Type: ResponseTimeSampleType,
+                                         List: a.ResponseTimeSampleList }
+        a.ResponseTimeSampleList = nil
       }
     }
   }
 }
 
-func (a *Aggregator) Stats() (uint, uint){
+func (a *Aggregator) Stats() (uint, uint, uint){
   queryCounter := a.QueryCounter
   responseCounter := a.ResponseCounter
+  responseTimeSampleCounter := a.ResponseTimeSampleCounter
   a.QueryCounter = 0
   a.ResponseCounter = 0
-  return queryCounter, responseCounter
+  a.ResponseTimeSampleCounter = 0
+  return queryCounter, responseCounter, responseTimeSampleCounter
 }
