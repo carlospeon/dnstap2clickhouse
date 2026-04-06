@@ -22,6 +22,9 @@ of occurences.
 * Aggregate messages grouping by *QueryAddress*
 * Aggregate messages grouping by *QuestionName* and *QuestionType*
 
+Since version 0.7 also match samples of client queries/responses and calculates the
+difference between *ResponseTime* and *QueryTime* as *ResponseTimeDelta*.
+
 OPTIONS
 =======
 
@@ -70,13 +73,16 @@ Password = ""
 Database = "default"
 InsecureSkipVerify = "false"
 
-# QueryTable. Table to insert client queries.
+# QueryTable. To insert client queries.
 QueryTable = "clientQuery"
-# ResponseTable. Table to insert client responses.
+# ResponseTable. To insert client responses.
 ResponseTable = "clientResponse"
+# ResponseTimeTable. To insert response times.
+QueryResponseTimeTable = "clientQueryResponseTime"
 # Column names
 QueryTimeColumn = "queryTime"
 ResponseTimeColumn = "responseTime"
+QueryResponseTimeDeltaColumn = "responseTimeDelta"
 ResponseStatusColumn = "responseStatus"
 IdentityColumn = "identity"
 QueryAddressColumn = "queryAddress"
@@ -95,6 +101,8 @@ Readers = 1
 ClientQueries = true
 # NonOkClientResponses. Process non OK client responses
 NonOkClientResponses = true
+# ResponseTimeTable. To insert response times.
+QueryResponseTimeTable = "clientQueryResponseTime"
 ```
 
 CAVEATS
@@ -113,7 +121,7 @@ by *SELinux*.
 user as the DNS server is recommended.
 
 **Configuration permissions**
-Configuration store ClickHouse password so is not world accesible by default.
+Configuration stores ClickHouse password so is not world accesible by default.
 Set a proper owner/group to it.
 
 **Startup order/dependecies**.

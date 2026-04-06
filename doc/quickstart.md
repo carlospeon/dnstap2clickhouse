@@ -81,6 +81,18 @@ ENGINE = Memory
 SETTINGS min_rows_to_keep = 100, max_rows_to_keep = 1000;
 ```
 
+Response time samples average:
+```
+create table clientQueryResponseTime (
+  responseTime DateTime64(3),
+  identity LowCardinality(String),
+  responseTimeDelta UInt64
+)
+ENGINE = Memory
+SETTINGS min_rows_to_keep = 100, max_rows_to_keep = 1000;
+
+```
+
 Grafana
 =======
 
@@ -128,3 +140,15 @@ GROUP BY responseTimeInterval, responseStatus, questionName, questionType
 ORDER BY responseTimeInterval ASC
 ```
 
+Response time samples average:
+```
+SELECT
+  $__timeInterval(responseTime) AS responseTime,
+  identity,
+  avg(responseTimeDelta) as "Response time"
+FROM clientQueryResponseTime
+WHERE
+    $__timeFilter(responseTime)
+GROUP BY responseTime, identity
+ORDER BY responseTime ASC
+```
