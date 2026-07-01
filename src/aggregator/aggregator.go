@@ -218,7 +218,7 @@ func Init(a *Aggregator) (*Aggregator) {
 }
 
 func (a *Aggregator) Close() {
-  close(a.ReadChannel)
+  // close(a.ReadChannel)
   clear(a.QueryAggregationMap)
   clear(a.ResponseAggregationMap)
   clear(a.QueryResponseTimeSampleMap)
@@ -529,7 +529,10 @@ func (a *Aggregator) BuildResponseTimeSampleAggregationList() {
 
 func (a *Aggregator) Run (context context.Context, wg *sync.WaitGroup) {
   defer wg.Done()
-  defer a.Close()
+	/* need to close in the main rutine
+   * to avoid close the read channel before other rutine writes
+   * defer a.Close()
+	 */
   log.Debug.Printf("Running aggregator with interval %s\n", a.Config.WriteInterval)
 
   timer := time.NewTimer(a.Config.WriteInterval)

@@ -178,8 +178,13 @@ func run(ctx context.Context, cancel context.CancelFunc) error {
 			}
 
     case <-ctx.Done():
+			/* dt.Listen and dt.Read still locks on ctx.Done,
+			 * it needs call dt.Close() to cancel goroutines
+			 */
       dt.Close()
       wg.Wait()
+			aggr.Close()
+			ch.Close()
       return err
     }
   }

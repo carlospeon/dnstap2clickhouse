@@ -48,8 +48,8 @@ type Config struct {
 }
 
 type Stats struct {
-	Queries uint
-	Responses uint
+  Queries uint
+  Responses uint
 }
 type Dnstap struct {
   Config Config
@@ -59,13 +59,13 @@ type Dnstap struct {
   ReadersConns [MAX_READERS]*net.Conn
   ReadersNumber atomic.Uint32
   ConnChannel chan *net.Conn
-	Counters Stats
+  Counters Stats
 }
 
 func Init(d *Dnstap) (*Dnstap, error) {
   if !d.Config.ClientQueries &&
      !d.Config.NonOkClientResponses &&
-		 !d.Config.ClientResponseTimeSamples {
+     !d.Config.ClientResponseTimeSamples {
     return nil, errors.New("Nothing to do, check configuration options " +
                             "ClientQueries and/or NonOkClientResponses")
   }
@@ -294,7 +294,7 @@ func (d *Dnstap) Decode(context context.Context,
           QueryTime: queryTime,
           QuestionName: question.Name,
           QuestionType: dns.Type(question.Qtype).String(),
-					Id: dnsMsg.MsgHdr.Id,
+          Id: dnsMsg.MsgHdr.Id,
           // ResponseTimeSample: responseTimeSample,
           Counter: 1,
         }
@@ -342,7 +342,7 @@ func (d *Dnstap) Decode(context context.Context,
         clientResponseRateTime = responseTime.Add(d.Config.ClientResponseTimeIntervalSample)
       }*/
 
-			isSuccess := (dnsMsg.Rcode == dns.RcodeSuccess)
+      isSuccess := (dnsMsg.Rcode == dns.RcodeSuccess)
       if isSuccess && !d.Config.ClientResponseTimeSamples {
         // Skip no error messages
         continue
@@ -358,8 +358,8 @@ func (d *Dnstap) Decode(context context.Context,
           ResponseStatus: responseStatus,
           QuestionName: question.Name,
           QuestionType: dns.Type(question.Qtype).String(),
-					Id: dnsMsg.MsgHdr.Id,
-					IsSuccess: isSuccess,
+          Id: dnsMsg.MsgHdr.Id,
+          IsSuccess: isSuccess,
           //ResponseTimeSample: responseTimeSample,
           Counter: 1,
         }
@@ -378,9 +378,9 @@ func (d *Dnstap) Decode(context context.Context,
 }
 
 func (d *Dnstap) GetStats() Stats {
-	stats := d.Counters
-	d.Counters.Queries = 0
-	d.Counters.Responses = 0
+  stats := d.Counters
+  d.Counters.Queries = 0
+  d.Counters.Responses = 0
  
   return stats
 }

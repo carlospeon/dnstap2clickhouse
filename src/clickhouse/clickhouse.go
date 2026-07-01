@@ -327,7 +327,10 @@ func (ch *ClickHouse) writeMessageList(context context.Context,
 
 func (ch *ClickHouse) Run(context context.Context, wg *sync.WaitGroup) {
   defer wg.Done()
-  defer ch.Close()
+	/* need to close in the main rutine
+   * to avoid close the read channel before other rutine writes
+   * defer ch.Close()
+	 */
   var err error  
 
   if !ch.Config.ClientQueries && !ch.Config.NonOkClientResponses &&
